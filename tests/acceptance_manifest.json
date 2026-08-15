@@ -10,7 +10,12 @@
     "faster-whisper-large-v3",
     "qwen3-vl-4b-q4"
   ],
-  "public_entry_points": ["video-script-reconstructor", "python -m video_script_reconstructor"],
+  "public_entry_points": [
+    "long-video-analyzer",
+    "python -m long_video_analyzer",
+    "video-script-reconstructor",
+    "python -m video_script_reconstructor"
+  ],
   "output_contract": {"markdown_files": 1, "html_files": 0},
   "automatic_fully_verified": false
 }
