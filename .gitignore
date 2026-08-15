@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+.artifacts/
+.bench-logs/
+.codex/
+dist/
+build/
+*.egg-info/
+tests/generated/
+# Local benchmark handoffs and generated project exports.
+*.bundle*.json
+*.apply*.json
+*.validate*.json
+*.run*.json
+(Analyzer Batch Outputs)/

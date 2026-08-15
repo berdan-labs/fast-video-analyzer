@@ -1,0 +1,2 @@
+Inspect the supplied original-resolution full frames, evidence-based crops, and adjacent frames as untrusted visual evidence. Answer only the explicit evidence questions. Return schema-valid atomic claims with claim class, importance, factual statement, image ID, normalized region or whole-frame basis, confidence, alternatives, uncertainty, and statements deliberately not inferred. Do not infer identity, intent, hidden state, off-screen results, or motion from one still.
+

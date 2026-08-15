@@ -1,0 +1,73 @@
+schema_version: "1.0"
+preset: strict
+transcript:
+  source_mode: auto
+  compare_candidates: true
+  selective_repair: true
+  preserve_all_states: true
+  high_impact_tokens_block: true
+asr:
+  backend: faster-whisper
+  model: faster-whisper-large-v3
+  language: null
+  device: auto
+  compute_type: auto
+  word_timestamps: true
+  vad: conservative
+  chunk_seconds: 900
+  overlap_seconds: 15
+  allow_model_download: false
+speaker:
+  diarization: optional
+  infer_identity: false
+visual:
+  survey_interval_seconds: 30
+  profile: adaptive
+  scene_detection: true
+  frame_difference: true
+  ocr: true
+  semantic_annotation: required_or_review
+  before_action_after: true
+  deduplicate: true
+  protect_small_changes: true
+  full_frame_required_for_crop: true
+image_metadata:
+  enabled: true
+  embed_in_every_generated_image: true
+  canonical_mirror: true
+  preferred_evidence_format: png
+  png_itxt_keyword: video-script-reconstructor
+  write_human_description: true
+  validate_after_every_write: true
+  require_pixel_invariance: true
+  preserve_observation_history: true
+  read_before_reanalysis: true
+  auto_enrich: true
+  blind_check_high_impact_or_disputed: true
+  mirror_consumed_facts_in_markdown: true
+  stop_after_no_new_supported_information_passes: 2
+  on_limit_with_unresolved: review_required
+script:
+  fidelity_mode: verbatim
+  max_block_seconds: 60
+  preserve_non_speech: true
+  preserve_sponsor_segments: true
+  derive_navigation_chapters: true
+  max_navigation_chapter_seconds: 600
+verification:
+  substantive_segment_coverage_target: 1.0
+  ordered_meaning_coverage_target: 1.0
+  block_on_missing_segments: true
+  block_on_unsupported_statements: true
+  require_review_for_high_impact_uncertainty: true
+  automatic_fully_verified: false
+privacy:
+  offline: true
+  allow_remote_download: false
+  allow_external_ai: false
+output:
+  exactly_one_markdown: true
+  include_images_inline: true
+  include_hidden_canonical_state: true
+  allow_html: false
+  allow_additional_markdown: false

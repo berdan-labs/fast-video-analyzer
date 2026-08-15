@@ -1,0 +1,474 @@
+{
+  "$defs": {
+    "ASRConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_model_download": {
+          "default": false,
+          "title": "Allow Model Download",
+          "type": "boolean"
+        },
+        "backend": {
+          "default": "faster-whisper",
+          "title": "Backend",
+          "type": "string"
+        },
+        "chunk_seconds": {
+          "default": 900,
+          "exclusiveMinimum": 0,
+          "title": "Chunk Seconds",
+          "type": "integer"
+        },
+        "compute_type": {
+          "default": "auto",
+          "title": "Compute Type",
+          "type": "string"
+        },
+        "device": {
+          "default": "auto",
+          "title": "Device",
+          "type": "string"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "model": {
+          "default": "faster-whisper-large-v3",
+          "title": "Model",
+          "type": "string"
+        },
+        "overlap_seconds": {
+          "default": 15,
+          "minimum": 0,
+          "title": "Overlap Seconds",
+          "type": "integer"
+        },
+        "vad": {
+          "default": "conservative",
+          "enum": [
+            "off",
+            "conservative",
+            "default",
+            "aggressive"
+          ],
+          "title": "Vad",
+          "type": "string"
+        },
+        "word_timestamps": {
+          "default": true,
+          "title": "Word Timestamps",
+          "type": "boolean"
+        }
+      },
+      "title": "ASRConfig",
+      "type": "object"
+    },
+    "ImageMetadataConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_enrich": {
+          "default": true,
+          "title": "Auto Enrich",
+          "type": "boolean"
+        },
+        "blind_check_high_impact_or_disputed": {
+          "default": true,
+          "title": "Blind Check High Impact Or Disputed",
+          "type": "boolean"
+        },
+        "canonical_mirror": {
+          "default": true,
+          "title": "Canonical Mirror",
+          "type": "boolean"
+        },
+        "embed_in_every_generated_image": {
+          "default": true,
+          "title": "Embed In Every Generated Image",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "mirror_consumed_facts_in_markdown": {
+          "default": true,
+          "title": "Mirror Consumed Facts In Markdown",
+          "type": "boolean"
+        },
+        "on_limit_with_unresolved": {
+          "default": "review_required",
+          "enum": [
+            "review_required",
+            "blocked"
+          ],
+          "title": "On Limit With Unresolved",
+          "type": "string"
+        },
+        "png_itxt_keyword": {
+          "default": "video-script-reconstructor",
+          "title": "Png Itxt Keyword",
+          "type": "string"
+        },
+        "preferred_evidence_format": {
+          "const": "png",
+          "default": "png",
+          "title": "Preferred Evidence Format",
+          "type": "string"
+        },
+        "preserve_observation_history": {
+          "default": true,
+          "title": "Preserve Observation History",
+          "type": "boolean"
+        },
+        "read_before_reanalysis": {
+          "default": true,
+          "title": "Read Before Reanalysis",
+          "type": "boolean"
+        },
+        "require_pixel_invariance": {
+          "default": true,
+          "title": "Require Pixel Invariance",
+          "type": "boolean"
+        },
+        "stop_after_no_new_supported_information_passes": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Stop After No New Supported Information Passes",
+          "type": "integer"
+        },
+        "validate_after_every_write": {
+          "default": true,
+          "title": "Validate After Every Write",
+          "type": "boolean"
+        },
+        "write_human_description": {
+          "default": true,
+          "title": "Write Human Description",
+          "type": "boolean"
+        }
+      },
+      "title": "ImageMetadataConfig",
+      "type": "object"
+    },
+    "OutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_additional_markdown": {
+          "default": false,
+          "title": "Allow Additional Markdown",
+          "type": "boolean"
+        },
+        "allow_html": {
+          "default": false,
+          "title": "Allow Html",
+          "type": "boolean"
+        },
+        "exactly_one_markdown": {
+          "default": true,
+          "title": "Exactly One Markdown",
+          "type": "boolean"
+        },
+        "include_hidden_canonical_state": {
+          "default": true,
+          "title": "Include Hidden Canonical State",
+          "type": "boolean"
+        },
+        "include_images_inline": {
+          "default": true,
+          "title": "Include Images Inline",
+          "type": "boolean"
+        }
+      },
+      "title": "OutputConfig",
+      "type": "object"
+    },
+    "PrivacyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_external_ai": {
+          "default": false,
+          "title": "Allow External Ai",
+          "type": "boolean"
+        },
+        "allow_remote_download": {
+          "default": false,
+          "title": "Allow Remote Download",
+          "type": "boolean"
+        },
+        "offline": {
+          "default": true,
+          "title": "Offline",
+          "type": "boolean"
+        }
+      },
+      "title": "PrivacyConfig",
+      "type": "object"
+    },
+    "ScriptConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "derive_navigation_chapters": {
+          "default": true,
+          "title": "Derive Navigation Chapters",
+          "type": "boolean"
+        },
+        "fidelity_mode": {
+          "default": "verbatim",
+          "enum": [
+            "verbatim",
+            "clean-verbatim",
+            "production-script"
+          ],
+          "title": "Fidelity Mode",
+          "type": "string"
+        },
+        "max_block_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "title": "Max Block Seconds",
+          "type": "integer"
+        },
+        "max_navigation_chapter_seconds": {
+          "default": 600,
+          "exclusiveMinimum": 0,
+          "title": "Max Navigation Chapter Seconds",
+          "type": "integer"
+        },
+        "preserve_non_speech": {
+          "default": true,
+          "title": "Preserve Non Speech",
+          "type": "boolean"
+        },
+        "preserve_sponsor_segments": {
+          "default": true,
+          "title": "Preserve Sponsor Segments",
+          "type": "boolean"
+        }
+      },
+      "title": "ScriptConfig",
+      "type": "object"
+    },
+    "SpeakerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "diarization": {
+          "default": "optional",
+          "enum": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "title": "Diarization",
+          "type": "string"
+        },
+        "infer_identity": {
+          "default": false,
+          "title": "Infer Identity",
+          "type": "boolean"
+        }
+      },
+      "title": "SpeakerConfig",
+      "type": "object"
+    },
+    "TranscriptConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "compare_candidates": {
+          "default": true,
+          "title": "Compare Candidates",
+          "type": "boolean"
+        },
+        "high_impact_tokens_block": {
+          "default": true,
+          "title": "High Impact Tokens Block",
+          "type": "boolean"
+        },
+        "preserve_all_states": {
+          "default": true,
+          "title": "Preserve All States",
+          "type": "boolean"
+        },
+        "selective_repair": {
+          "default": true,
+          "title": "Selective Repair",
+          "type": "boolean"
+        },
+        "source_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "provided",
+            "embedded",
+            "asr"
+          ],
+          "title": "Source Mode",
+          "type": "string"
+        }
+      },
+      "title": "TranscriptConfig",
+      "type": "object"
+    },
+    "VerificationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_fully_verified": {
+          "default": false,
+          "title": "Automatic Fully Verified",
+          "type": "boolean"
+        },
+        "block_on_missing_segments": {
+          "default": true,
+          "title": "Block On Missing Segments",
+          "type": "boolean"
+        },
+        "block_on_unsupported_statements": {
+          "default": true,
+          "title": "Block On Unsupported Statements",
+          "type": "boolean"
+        },
+        "ordered_meaning_coverage_target": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Ordered Meaning Coverage Target",
+          "type": "number"
+        },
+        "require_review_for_high_impact_uncertainty": {
+          "default": true,
+          "title": "Require Review For High Impact Uncertainty",
+          "type": "boolean"
+        },
+        "substantive_segment_coverage_target": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Substantive Segment Coverage Target",
+          "type": "number"
+        }
+      },
+      "title": "VerificationConfig",
+      "type": "object"
+    },
+    "VisualConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "before_action_after": {
+          "default": true,
+          "title": "Before Action After",
+          "type": "boolean"
+        },
+        "deduplicate": {
+          "default": true,
+          "title": "Deduplicate",
+          "type": "boolean"
+        },
+        "frame_difference": {
+          "default": true,
+          "title": "Frame Difference",
+          "type": "boolean"
+        },
+        "full_frame_required_for_crop": {
+          "default": true,
+          "title": "Full Frame Required For Crop",
+          "type": "boolean"
+        },
+        "ocr": {
+          "default": true,
+          "title": "Ocr",
+          "type": "boolean"
+        },
+        "profile": {
+          "default": "adaptive",
+          "title": "Profile",
+          "type": "string"
+        },
+        "protect_small_changes": {
+          "default": true,
+          "title": "Protect Small Changes",
+          "type": "boolean"
+        },
+        "scene_detection": {
+          "default": true,
+          "title": "Scene Detection",
+          "type": "boolean"
+        },
+        "semantic_annotation": {
+          "default": "required_or_review",
+          "enum": [
+            "required",
+            "required_or_review",
+            "optional",
+            "none"
+          ],
+          "title": "Semantic Annotation",
+          "type": "string"
+        },
+        "survey_interval_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "title": "Survey Interval Seconds",
+          "type": "number"
+        }
+      },
+      "title": "VisualConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "asr": {
+      "$ref": "#/$defs/ASRConfig"
+    },
+    "image_metadata": {
+      "$ref": "#/$defs/ImageMetadataConfig"
+    },
+    "output": {
+      "$ref": "#/$defs/OutputConfig"
+    },
+    "preset": {
+      "default": "strict",
+      "enum": [
+        "strict",
+        "balanced"
+      ],
+      "title": "Preset",
+      "type": "string"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyConfig"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "script": {
+      "$ref": "#/$defs/ScriptConfig"
+    },
+    "speaker": {
+      "$ref": "#/$defs/SpeakerConfig"
+    },
+    "transcript": {
+      "$ref": "#/$defs/TranscriptConfig"
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationConfig"
+    },
+    "visual": {
+      "$ref": "#/$defs/VisualConfig"
+    }
+  },
+  "title": "AppConfig",
+  "type": "object"
+}

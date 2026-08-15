@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "long-video-analyzer"
+version = "0.1.0"
+description = "Evidence-grounded long-form video analysis with transcript, OCR, visual snapshots, and provenance"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Long Video Analyzer contributors" }]
+dependencies = [
+  "jsonschema>=4.23",
+  "Pillow>=10.4",
+  "pydantic>=2.8",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.1"]
+cuda = ["nvidia-cublas-cu12>=12.0"]
+ocr = ["pytesseract>=0.3.13"]
+models = ["huggingface-hub>=0.28"]
+speech-qwen = ["huggingface-hub>=0.28"]
+speech-moss = ["huggingface-hub>=0.28"]
+ocr-paddle-worker = ["huggingface-hub>=0.28"]
+vision-local = ["huggingface-hub>=0.28"]
+diarization = ["huggingface-hub>=0.28"]
+dev = [
+  "build>=1.2",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "types-jsonschema>=4.23",
+  "types-PyYAML>=6.0.12",
+]
+media = []
+
+[project.urls]
+Homepage = "https://github.com/vinnce143/long-video-analyzer"
+Repository = "https://github.com/vinnce143/long-video-analyzer"
+Issues = "https://github.com/vinnce143/long-video-analyzer/issues"
+
+[project.scripts]
+long-video-analyzer = "video_script_reconstructor.cli:main"
+video-script-reconstructor = "video_script_reconstructor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/video_script_reconstructor", "src/long_video_analyzer"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs" = "video_script_reconstructor/resources/configs"
+"prompts" = "video_script_reconstructor/resources/prompts"
+"references" = "video_script_reconstructor/resources/references"
+"assets" = "video_script_reconstructor/resources/assets"
+"agents" = "video_script_reconstructor/resources/agents"
+"SKILL.md" = "video_script_reconstructor/resources/SKILL.md"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/configs",
+  "/prompts",
+  "/references",
+  "/assets",
+  "/agents",
+  "/scripts",
+  "/SKILL.md",
+  "/README.md",
+  "/LICENSE",
+  "/.gitignore",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = [
+  "E501", # Black-compatible wrapping is handled by formatter; long evidence strings stay readable.
+  "S101", # Pytest uses assertions by design.
+  "S603", # Every subprocess call uses an explicit argument array and shell=False/default.
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["video_script_reconstructor"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "model_dependent: requires optional local model weights or executable",
+  "faster_whisper_model: exercises locally available faster-whisper large-v3 weights",
+  "qwen3_asr: exercises local Qwen3-ASR and Qwen3-ForcedAligner weights",
+  "ocr_executable: exercises a locally available OCR executable",
+  "neural_diarization: exercises a configured neural diarization backend",
+  "forced_alignment: exercises a configured forced-alignment backend",
+  "semantic_vision: exercises a configured semantic visual-analysis backend",
+  "e2e: decodes a generated media container through the public pipeline",
+]

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "mandatory_suites": ["unit", "integration", "e2e", "mutation", "packaging"],
+  "model_dependent": [
+    "qwen3-asr-1.7b",
+    "qwen3-forced-aligner-0.6b",
+    "moss-transcribe-diarize-0.9b",
+    "pp-ocrv5-server",
+    "tesseract",
+    "faster-whisper-large-v3",
+    "qwen3-vl-4b-q4"
+  ],
+  "public_entry_points": ["video-script-reconstructor", "python -m video_script_reconstructor"],
+  "output_contract": {"markdown_files": 1, "html_files": 0},
+  "automatic_fully_verified": false
+}
