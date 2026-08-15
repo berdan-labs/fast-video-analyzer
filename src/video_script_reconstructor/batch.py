@@ -313,7 +313,10 @@ def run_batch(
     # History is immutable for the duration of a forecast pass except for
     # measurements produced by this pass.  Keep one in-memory snapshot rather
     # than recursively parsing every prior project once per source video.
-    historical_rates = _historical_rates((*history_roots, output_root_path))
+    rate_roots = (*history_roots, output_root_path)
+    if colocated_batch:
+        rate_roots = (*rate_roots, source_root_path)
+    historical_rates = _historical_rates(rate_roots)
     previous_budget = os.environ.get("VSR_SEMANTIC_MAX_PACKETS")
     try:
         if semantic_max_packets is not None:
