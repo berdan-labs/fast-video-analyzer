@@ -268,14 +268,11 @@ def _discover_orphans(
     """
 
     recognized = tuple(path.resolve() for path in recognized_projects)
-    candidates: list[RetentionOrphan] = []
-    seen: set[Path] = set()
+    candidate_paths: set[Path] = set()
     for state_dir in _directory_tree(target):
         if state_dir.name != ".state":
             continue
         candidate = state_dir.parent.resolve()
-        if any(candidate == existing or candidate.is_relative_to(existing) for existing in seen):
-            continue
         if any(
             candidate == project or project.is_relative_to(candidate) for project in recognized
         ):
@@ -287,10 +284,25 @@ def _discover_orphans(
         if not markers:
             continue
         ensure_contained(target, candidate, allow_missing=False)
+        candidate_paths.add(candidate)
+
+    # Directory traversal order is filesystem-dependent.  Normalize nested
+    # candidates after discovery so a child orphan never appears alongside its
+    # parent, regardless of which marker directory was visited first.
+    selected_paths: list[Path] = []
+    for candidate in sorted(
+        candidate_paths, key=lambda path: (len(path.parts), str(path).casefold())
+    ):
+        if any(candidate == parent or candidate.is_relative_to(parent) for parent in selected_paths):
+            continue
+        selected_paths.append(candidate)
+
+    candidates: list[RetentionOrphan] = []
+    for candidate in selected_paths:
+        markers = _orphan_marker_names(candidate)
         file_count, total_bytes, _reclaimable_file_count, _reclaimable_bytes = _directory_usage(
             candidate
         )
-        seen.add(candidate)
         candidates.append(
             RetentionOrphan(
                 path=str(candidate),

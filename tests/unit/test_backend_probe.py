@@ -7,6 +7,7 @@ import pytest
 import video_script_reconstructor.pipeline as pipeline_module
 from video_script_reconstructor.backend_probe import probe_optional_backends
 from video_script_reconstructor.pipeline import doctor_report
+from video_script_reconstructor.validate_output import _metadata_verify_workers
 
 
 def test_optional_backend_probe_is_read_only_and_reports_exact_capabilities(
@@ -96,7 +97,7 @@ def test_doctor_reports_bounded_scheduler_settings(tmp_path: Path, monkeypatch) 
         "ocr_batch_size": 256,
         "asr_cpu_threads": 4,
         "asr_num_workers": 1,
-        "validator_metadata_workers": 16,
+        "validator_metadata_workers": _metadata_verify_workers(),
         "parallel_visual_survey": True,
     }
 
