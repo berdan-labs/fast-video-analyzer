@@ -145,7 +145,7 @@ def render_markdown(project: Any) -> str:
             f"- Duration: `{timestamp(media.get('duration_ms'))}`",
             f"- Transcript decision: {safe_evidence_text(str(data.get('transcript_source_decision') or 'See source-selection history.'))}",
             f"- Verification state: `{status}` (automatic checks never imply human verification)",
-            "- This is an evidence-grounded analysis of completed media, not a recovered private or unpublished script.",
+            "- This report summarizes completed media using timestamped transcript, OCR, visual evidence, and validation metadata; it is not a recovered private or unpublished script.",
             "",
             "## Chapter index",
             "",

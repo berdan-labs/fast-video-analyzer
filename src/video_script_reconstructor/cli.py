@@ -104,8 +104,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="long-video-analyzer",
         description=(
-            "Long Video Analyzer: analyze long-form video into a complete, evidence-grounded Markdown report "
-            "with linked snapshots, OCR, transcript context, and provenance."
+            "Long Video Analyzer: analyze long-form video into structured Markdown and JSON reports "
+            "with transcript context, OCR, visual evidence, and provenance metadata."
         ),
     )
     parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
@@ -136,7 +136,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--offline", action="store_true")
 
-    run = commands.add_parser("run", help="Run the accuracy-first long-video analysis pipeline.")
+    run = commands.add_parser("run", help="Run the long-video analysis pipeline.")
     run.add_argument("input")
     run.add_argument(
         "--output",

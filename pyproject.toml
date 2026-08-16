@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "long-video-analyzer"
 version = "0.1.0"
-description = "Evidence-grounded long-form video analysis with transcript, OCR, visual snapshots, and provenance"
+description = "Analyze long-form video with transcripts, OCR, and visual evidence."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

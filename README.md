@@ -1,15 +1,12 @@
 # Long Video Analyzer
 
-Long Video Analyzer turns long-form video into a complete, evidence-grounded
-Markdown report. It preserves what was said and shown instead of producing a
-short summary: transcript/subtitle context, OCR, timestamped snapshots, visual
-state changes, uncertainty, provenance, and validation receipts are retained in
-one portable output folder.
+Long Video Analyzer analyzes long-form video and produces structured Markdown
+and JSON reports with timestamped transcript or subtitle context, OCR, visual
+evidence, and provenance metadata.
 
-The implementation is deliberately offline-first and accuracy-first. The
-historical `video_script_reconstructor` Python import path and
-`video-script-reconstructor` command remain available for compatibility, but
-the public product name and documentation are **Long Video Analyzer**.
+It runs offline-first when supplied subtitles and local workers are available.
+Reports retain source timestamps, frame IDs, hashes, review status, and
+validation receipts so results can be inspected and reproduced.
 
 ## Install
 
@@ -27,7 +24,7 @@ FFmpeg and FFprobe must be available on `PATH`. Optional OCR, ASR, and local
 model workers are installed separately; `long-video-analyzer doctor --offline`
 reports what is available without downloading anything.
 
-## Analyze one video
+## Quick start: analyze one video
 
 ```powershell
 long-video-analyzer run "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation.mp4" `
@@ -68,7 +65,7 @@ The default host-agent path writes a hash-checked review bundle rather than
 silently inventing visual facts. A run can finish as `automatically_checked`,
 `review_required`, or `blocked`; the Markdown report always states which one.
 
-## Validate and inspect
+## Validate and inspect results
 
 ```powershell
 long-video-analyzer validate "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation (Analyzer Outputs)"
@@ -76,12 +73,17 @@ long-video-analyzer review list "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation
 long-video-analyzer doctor --offline
 ```
 
-## Privacy and safety
+## Privacy, safety, and limitations
 
 The strict examples above are offline and provided-subtitle-only. Remote media,
 model downloads, and external AI require explicit opt-in flags. Paths are
 contained, visible text is treated as untrusted evidence, and every generated
 claim is tied to exact frame IDs and validation metadata.
+
+Results depend on the supplied subtitles and on the OCR, ASR, and vision
+workers available in the environment. Deterministic validation checks file,
+pixel, timestamp, and provenance invariants; it does not independently prove
+that every semantic interpretation is correct.
 
 ## Development
 
@@ -95,6 +97,10 @@ mypy src/video_script_reconstructor src/long_video_analyzer
 The internal package name is intentionally retained as a compatibility layer;
 new integrations should invoke `long-video-analyzer` and use the source-adjacent
 output convention.
+
+The historical `video_script_reconstructor` Python import path and
+`video-script-reconstructor` command remain available for compatibility, but
+the public product name and documentation are **Long Video Analyzer**.
 
 ## Comparable tools
 
