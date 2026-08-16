@@ -107,19 +107,23 @@ def process_memory_usage() -> dict[str, int | None]:
         counters = _Counters()
         counters.cb = ctypes.sizeof(_Counters)
         try:
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            psapi = ctypes.WinDLL("psapi", use_last_error=True)
-            get_current_process = kernel32.GetCurrentProcess
-            get_current_process.restype = ctypes.c_void_p
-            get_process_memory_info = psapi.GetProcessMemoryInfo
-            get_process_memory_info.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(_Counters),
-                ctypes.c_ulong,
-            ]
-            get_process_memory_info.restype = ctypes.c_int
-            process = get_current_process()
-            ok = get_process_memory_info(process, ctypes.byref(counters), counters.cb)
+            win_dll = getattr(ctypes, "WinDLL", None)
+            if win_dll is None:
+                ok = 0
+            else:
+                kernel32 = win_dll("kernel32", use_last_error=True)
+                psapi = win_dll("psapi", use_last_error=True)
+                get_current_process = kernel32.GetCurrentProcess
+                get_current_process.restype = ctypes.c_void_p
+                get_process_memory_info = psapi.GetProcessMemoryInfo
+                get_process_memory_info.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.POINTER(_Counters),
+                    ctypes.c_ulong,
+                ]
+                get_process_memory_info.restype = ctypes.c_int
+                process = get_current_process()
+                ok = get_process_memory_info(process, ctypes.byref(counters), counters.cb)
         except (AttributeError, OSError):
             ok = 0
         if ok:

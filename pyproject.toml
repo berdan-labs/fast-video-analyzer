@@ -91,6 +91,21 @@ python_version = "3.10"
 strict = true
 packages = ["video_script_reconstructor"]
 
+[[tool.mypy.overrides]]
+module = [
+  "faster_whisper",
+  "huggingface_hub",
+  "moss_transcribe_diarize",
+  "moss_transcribe_diarize.*",
+  "paddle",
+  "paddleocr",
+  "qwen_asr",
+  "soundfile",
+  "torch",
+  "transformers",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

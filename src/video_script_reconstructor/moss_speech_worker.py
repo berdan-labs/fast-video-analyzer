@@ -43,13 +43,13 @@ def _transcribe(request: dict[str, Any]) -> dict[str, Any]:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
     import torch
-    from moss_transcribe_diarize import parse_transcript  # type: ignore[import-not-found]
-    from moss_transcribe_diarize.inference_utils import (  # type: ignore[import-not-found]
+    from moss_transcribe_diarize import parse_transcript
+    from moss_transcribe_diarize.inference_utils import (
         DEFAULT_PROMPT,
         build_transcription_messages,
         generate_transcription,
     )
-    from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore[import-not-found]
+    from transformers import AutoModelForCausalLM, AutoProcessor
 
     dtype = getattr(torch, dtype_name, None)
     if dtype is None:

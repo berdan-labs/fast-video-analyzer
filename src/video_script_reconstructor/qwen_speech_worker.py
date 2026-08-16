@@ -68,9 +68,9 @@ def _transcribe(request: dict[str, Any]) -> dict[str, Any]:
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-    import soundfile as sf  # type: ignore[import-not-found]
+    import soundfile as sf
     import torch
-    from qwen_asr import Qwen3ASRModel  # type: ignore[import-not-found]
+    from qwen_asr import Qwen3ASRModel
 
     dtype = getattr(torch, dtype_name, None)
     if dtype is None:

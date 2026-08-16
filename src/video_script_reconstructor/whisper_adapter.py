@@ -323,7 +323,7 @@ class FasterWhisperAdapter(ASRAdapter):
             )
         self._prepare_cuda_runtime()
         try:
-            from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+            from faster_whisper import WhisperModel
         except ImportError as exc:
             raise ASRDependencyError(
                 "faster-whisper is required for the production ASR adapter"

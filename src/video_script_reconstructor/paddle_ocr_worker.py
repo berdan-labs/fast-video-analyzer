@@ -37,8 +37,8 @@ def _load_engine(request: dict[str, Any]) -> tuple[Any, str]:
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
-    import paddle  # type: ignore[import-not-found]
-    from paddleocr import PaddleOCR  # type: ignore[import-not-found]
+    import paddle
+    from paddleocr import PaddleOCR
 
     if device.startswith("gpu") and not paddle.device.is_compiled_with_cuda():
         raise RuntimeError("GPU was requested but PaddlePaddle has no CUDA support")
