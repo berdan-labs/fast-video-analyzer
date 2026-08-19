@@ -47,8 +47,6 @@ Last reviewed: 2026-08-20
 ## Planned engineering follow-ups
 
 - [ ] Add a documented backup export and quarterly restore drill.
-- [ ] Add a documented action allowlist after inventorying the exact actions used
-  by the workflows and Dependabot.
 
 ## Recurring cadence
 
