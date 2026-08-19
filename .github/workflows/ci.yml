@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install FFmpeg from the runner package index
-        run: timeout 180s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
+        run: timeout 600s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
       - name: Verify FFmpeg
         run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
@@ -64,7 +64,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install FFmpeg from the runner package index
-        run: timeout 180s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
+        run: timeout 600s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
       - name: Verify FFmpeg
         run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
