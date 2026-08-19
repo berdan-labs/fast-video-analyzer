@@ -1,20 +1,22 @@
 # Fast Video Analyzer
 
-Fast Video Analyzer analyzes videos into structured Markdown notes for LLMs and
-AI agents. It uses Whisper ASR to transcribe speech, OCR to read text on screen,
-and scene detection to select the moments that matter.
+Fast Video Analyzer turns a video into a chronological record of its spoken
+content, visible text, and representative frames. It uses supplied subtitles or
+Whisper ASR for speech, OCR for text in frames, and scene detection to choose
+where to capture screenshots.
 
-The result is a time-ordered note with the transcript, scene screenshots, and
-on-screen text in one place. Supporting files stay beside the note, so a person
-or downstream tool can trace a finding back to the source video.
+Each run writes one Markdown report and a folder of linked screenshots, crops,
+and supporting data. Read it to review a recording without repeatedly scrubbing
+through the video, or use it as source material for an LLM or AI agent.
 
-## What you get
+## Output
 
-- A Markdown note organised by time.
+- A time-ordered report with timestamps, transcript blocks, visible text, and
+  selected frames.
 - Supplied subtitles or a locally generated Whisper transcript.
-- Screenshots of selected scenes and crops of on-screen text.
-- A local output folder containing the images and data needed to review the
-  result.
+- Full-size screenshots and OCR crops linked from the report.
+- A project folder containing the report, images, and validation data for later
+  review.
 
 ---
 
