@@ -15,8 +15,8 @@ depth.
 | `actions/stale` | `4391f3da665fdf50b6810c1a66712fb9ba21aa93` | Stale issue/PR maintenance |
 | `actions/upload-artifact` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | Release artifact handoff |
 | `astral-sh/setup-uv` | `37802adc94f370d6bfd71619e3f0bf239e1f3b78` | Locked Python environment setup |
-| `github/codeql-action/analyze` | `f3712979fa5f215279b101dd0a2e3bdfb4353324` | CodeQL analysis |
-| `github/codeql-action/init` | `f3712979fa5f215279b101dd0a2e3bdfb4353324` | CodeQL initialization |
+| `github/codeql-action/analyze` | `ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd` | CodeQL v4 analysis |
+| `github/codeql-action/init` | `ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd` | CodeQL v4 initialization |
 | `pypa/gh-action-pypi-publish` | `dc37677b2e1c63e2034f94d8a5b11f265b73ba33` | Human-gated PyPI publishing |
 
 Dependabot may update a pinned commit when upstream releases a new version;
