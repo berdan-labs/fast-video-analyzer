@@ -34,6 +34,7 @@ REQUIRED_FILES = (
     "ROADMAP.md",
     "SUPPORT.md",
     "docs/github-operations.md",
+    "docs/maintenance-backlog.md",
     "docs/releasing.md",
     "docs/runbooks.md",
     ".python-version",
