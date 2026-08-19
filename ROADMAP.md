@@ -2,6 +2,9 @@
 
 This roadmap records direction, not a promise of delivery dates.
 
+The executable owner checklist lives in
+[docs/maintenance-backlog.md](docs/maintenance-backlog.md).
+
 ## Now
 
 - Make locked CI, release, security, and maintainer runbooks reliable.
