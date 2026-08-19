@@ -28,25 +28,28 @@ Last reviewed: 2026-08-20
 - [x] Add a sanitized diagnostic-bundle command with privacy tests.
 - [x] Generate a CycloneDX runtime dependency SBOM and attach it to releases.
 - [x] Expand public CLI examples and compatibility tests for all entrypoint aliases.
+- [x] Adopt an explicit single-administrator policy with pull-request-only
+  changes and zero required approvals; a second administrator is not required.
+- [x] Keep GitHub Discussions disabled because issue forms and `SUPPORT.md`
+  already provide the public support path.
+- [x] Disable the unused GitHub Wiki so repository documentation has one
+  reviewable, version-controlled home.
+- [x] Decide not to use GitHub Projects or release milestones until concurrent
+  work makes their maintenance value exceed their overhead.
+- [x] Add a non-secret backup export, integrity verification, and restore-drill
+  procedure.
 
 ## Owner decisions and external setup
 
-- [ ] Appoint a second trusted human administrator with MFA and offline recovery
-  codes. Only then require an approval and CODEOWNERS review on `main`.
-- [ ] Configure the protected `pypi` environment and PyPI Trusted Publishing/OIDC
-  before enabling a real package publication.
-- [ ] Decide whether GitHub Discussions should be enabled for support and
-  announcements.
-- [ ] Decide whether the currently empty Wiki should remain enabled; disable it
-  if it will not be maintained.
-- [ ] Establish an encrypted off-GitHub mirror and perform a restore drill into
-  a fresh location.
-- [ ] Decide whether a GitHub Project and release milestones add enough value to
-  justify their ongoing maintenance.
+- [ ] Register PyPI's pending (or existing-project) Trusted Publisher for
+  `fast-video-analyzer`; GitHub's branch-restricted `pypi` environment and OIDC
+  workflow are ready, but the PyPI account step cannot be performed here.
+- [ ] Choose encrypted external backup storage, create the first off-GitHub
+  mirror, and record a successful restore drill.
 
 ## Planned engineering follow-ups
 
-- [ ] Add a documented backup export and quarterly restore drill.
+- [x] Add a documented backup export and quarterly restore drill.
 
 ## Recurring cadence
 

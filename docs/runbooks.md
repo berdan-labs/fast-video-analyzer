@@ -46,13 +46,15 @@ the clean-install and CLI smoke checks pass.
 
 ## Lost GitHub access
 
-Use offline recovery codes and the second human administrator or organization
-owner. Do not create shared accounts or put recovery credentials in the
-repository. After recovery, audit collaborators, Apps, deploy keys, webhooks,
-environments, tokens, and branch protections.
+Use the owner's offline recovery codes. Do not create shared accounts or put
+recovery credentials in the repository. After recovery, audit collaborators,
+Apps, deploy keys, webhooks, environments, tokens, and branch protections.
 
 ## Restore drill
 
-Quarterly, restore the Git mirror, releases, documentation, and GitHub metadata
-into a fresh location. Confirm that a different maintainer can run the checks,
-understand the operating docs, and produce a release without private context.
+Quarterly, create and verify an encrypted off-GitHub backup, then restore it to
+a fresh location with the commands in
+[backup-and-restore.md](backup-and-restore.md). Confirm the restored commit,
+maintenance contract, release documentation, and GitHub metadata snapshot. Any
+secret, App, webhook, or PyPI configuration gap must be recorded and recreated
+through its owning service rather than copied from the backup.
