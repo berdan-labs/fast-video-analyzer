@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/berdan-labs/fast-video-analyzer/security/advisories/new
+    about: Report security-sensitive issues privately. Do not include credentials or private media in a public issue.
+  - name: Documentation and usage guide
+    url: https://github.com/berdan-labs/fast-video-analyzer/blob/main/CONTRIBUTING.md
+    about: Check the development and contribution guidance before opening an issue.

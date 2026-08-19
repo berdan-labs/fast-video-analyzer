@@ -1,0 +1,32 @@
+name: Triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Label and acknowledge new issue
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GH_REPO" --add-label "triage/untriaged"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body-file - <<'EOF'
+          Thanks for opening this issue! It has been labeled `triage/untriaged` and will be reviewed by a maintainer.
+
+          Before triage, please confirm that you have included the exact command, environment details, and the output of `fast-video-analyzer doctor --offline` where applicable. Do not attach credentials, private media, model weights, or complete generated project directories.
+          EOF
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}

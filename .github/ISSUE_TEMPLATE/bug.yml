@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible defect in Fast Video Analyzer.
+title: "[Bug] "
+labels:
+  - type/bug
+  - triage/untriaged
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach credentials, private media, model weights, or complete generated project directories. Use the private security advisory path for security-sensitive reports.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: Include the complete command and relevant flags.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic output
+      description: Run fast-video-analyzer doctor --offline and paste sanitized output.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Analyzer version
+      placeholder: fast-video-analyzer --version
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python
+      placeholder: Windows 11, Python 3.12
+    validations:
+      required: true
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: FFmpeg version
+      placeholder: ffmpeg -version
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction details
+      description: Describe a minimal reproducible input. Prefer hashes and synthetic fixtures over uploading private media.

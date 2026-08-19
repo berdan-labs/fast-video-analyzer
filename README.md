@@ -126,12 +126,24 @@ and escaped in Markdown deliverables.
 ## Development
 
 ```bash
-pytest tests/unit -q
-pytest tests/integration -q
-
-ruff check src tests
-mypy src/video_script_reconstructor
+uv sync --locked --extra dev
+uv run python scripts/verify_repo.py
+uv run ruff format --check scripts/verify_repo.py
+uv run ruff check src tests scripts
+uv run mypy src/video_script_reconstructor
+uv run pytest tests/unit tests/integration -q
 ```
+
+The full mandatory acceptance gate also includes the end-to-end, mutation, and
+packaging suites:
+
+```bash
+uv run pytest tests/e2e tests/mutation tests/packaging -q
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [OPERATIONS.md](OPERATIONS.md),
+[docs/releasing.md](docs/releasing.md), and [SUPPORT.md](SUPPORT.md) for
+maintainer and contributor workflows.
 
 ---
 

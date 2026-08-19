@@ -1,0 +1,19 @@
+name: Question or support request
+description: Ask for help using or integrating Fast Video Analyzer.
+title: "[Question] "
+labels:
+  - triage/untriaged
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and diagnostics
+      description: Include OS, Python, package version, exact command, and sanitized doctor output.
+    validations:
+      required: true

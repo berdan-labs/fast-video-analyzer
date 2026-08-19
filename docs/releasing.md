@@ -1,0 +1,32 @@
+# Release procedure
+
+Releases are created from a protected `vX.Y.Z` tag whose value matches the
+version in `pyproject.toml`.
+
+## Before tagging
+
+1. Update `CHANGELOG.md` and user-facing documentation.
+2. Run `uv sync --locked --extra dev`.
+3. Run `uv run ruff format --check scripts/verify_repo.py` and format any
+   changed Python files with Ruff before opening the release PR.
+4. Run `uv run ruff check src tests scripts`.
+5. Run `uv run mypy src/video_script_reconstructor`.
+6. Run the mandatory unit, integration, e2e, mutation, and packaging suites.
+7. Review compatibility, schema, privacy, and security impact.
+
+## Workflow
+
+The release workflow builds wheel and sdist, validates metadata with Twine,
+installs the wheel outside the checkout, runs CLI help and offline-doctor smoke
+checks, attests tagged builds, and creates a GitHub Release with artifacts.
+
+PyPI publication is intentionally manual through the protected `pypi`
+environment and requires Trusted Publishing/OIDC to be configured by a human.
+The workflow does not use a long-lived PyPI token.
+
+## Rollback
+
+If a release is defective, stop further publication, document the incident,
+mark the affected release clearly, and determine whether a corrected patch,
+package yanking, or GitHub release edit is appropriate. Never silently rewrite
+published history. Verify the corrected artifact from a clean environment.

@@ -35,7 +35,7 @@ print(json.dumps({
     "preset": load_config("strict").preset,
     "resource_lengths": {key: len(value) for key, value in resources.items()},
     "entry_points": entry_points,
-    "version": importlib.metadata.version("long-video-analyzer"),
+    "version": importlib.metadata.version("fast-video-analyzer"),
     "wrapper_file": long_video_analyzer.__file__,
 }))
 """

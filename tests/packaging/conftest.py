@@ -79,7 +79,7 @@ def installed_wheel(tmp_path_factory: pytest.TempPathFactory) -> InstalledWheel:
         pytest.fail(f"expected one wheel and one sdist, found {wheels!r} and {sdists!r}")
 
     environment = root / "venv"
-    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
+    venv.EnvBuilder(with_pip=True, system_site_packages=False).create(environment)
     if os.name == "nt":
         python = environment / "Scripts" / "python.exe"
         console = environment / "Scripts" / "fast-video-analyzer.exe"
@@ -91,7 +91,7 @@ def installed_wheel(tmp_path_factory: pytest.TempPathFactory) -> InstalledWheel:
         legacy_console = environment / "bin" / "video-script-reconstructor"
         compatibility_console = environment / "bin" / "long-video-analyzer"
     install = subprocess.run(
-        [str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
+        [str(python), "-m", "pip", "install", str(wheels[0])],
         cwd=root,
         capture_output=True,
         text=True,
