@@ -1,115 +1,134 @@
-# Long Video Analyzer
+# Fast Video Analyzer
 
-Long Video Analyzer analyzes long-form video and produces structured Markdown
-and JSON reports with timestamped transcript or subtitle context, OCR, visual
-evidence, and provenance metadata.
+Fast Video Analyzer is an offline-first command-line tool that turns video into
+a timestamped Markdown report. It combines supplied subtitles or local speech
+recognition with OCR, selected frames, and provenance data so results can be
+inspected later.
 
-It runs offline-first when supplied subtitles and local workers are available.
-Reports retain source timestamps, frame IDs, hashes, review status, and
-validation receipts so results can be inspected and reproduced.
+## What it produces
 
-## Install
+- Transcript or subtitle blocks with source timestamps.
+- Full-resolution frames and OCR crops retained as local evidence.
+- A Markdown report that links observations to their evidence.
+- Validation data, review queues, and receipts under `.state/`.
 
-```powershell
-python -m pip install .
+---
+
+## Installation
+
+### Prerequisites
+
+- **Python**: 3.10, 3.11, or 3.12
+- **FFmpeg & FFprobe**: Must be available on your system `PATH`.
+
+### Install
+
+```bash
+pip install "git+https://github.com/berdan-labs/fast-video-analyzer.git"
 ```
 
-For development and the full test suite:
+### Install from source
 
-```powershell
-python -m pip install ".[dev]"
+```bash
+git clone https://github.com/berdan-labs/fast-video-analyzer.git
+cd fast-video-analyzer
+pip install -e ".[asr,ocr]"
 ```
 
-FFmpeg and FFprobe must be available on `PATH`. Optional OCR, ASR, and local
-model workers are installed separately; `long-video-analyzer doctor --offline`
-reports what is available without downloading anything.
+Verify your local environment:
 
-## Quick start: analyze one video
+```bash
+fast-video-analyzer doctor --offline
+```
 
-```powershell
-long-video-analyzer run "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation.mp4" `
-  --subtitle "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation.srt" `
-  --preset strict `
-  --fidelity-mode verbatim `
-  --subtitle-mode provided-only `
-  --vision-mode host-agent `
+---
+
+## Quickstart
+
+Analyze a video with an existing subtitle file:
+
+```bash
+fast-video-analyzer run "path/to/video.mp4" \
+  --subtitle "path/to/video.srt" \
+  --preset strict \
   --offline
 ```
 
-When `--output` is omitted, the analyzer keeps results beside the source:
+If no subtitles are provided, run with offline Whisper ASR:
+
+```bash
+fast-video-analyzer run "path/to/video.mp4" \
+  --subtitle-mode force-asr \
+  --preset strict \
+  --offline
+```
+
+## Python API
+
+```python
+from pathlib import Path
+from video_script_reconstructor.pipeline import run_pipeline
+
+result = run_pipeline(
+    input_value=Path("recording.mp4"),
+    output_root=Path("outputs"),
+    subtitles=[Path("recording.srt")],
+    preset="strict",
+)
+
+print(f"Report: {result.markdown_path}")
+print(f"Output directory: {result.project_dir}")
+print(f"Status: {result.status}")
+```
+
+---
+
+## Output structure
+
+Outputs are written alongside the source video by default:
 
 ```text
-E:\Video\3DFC\
-├── 01 3DFC Pre-Challenge Preparation.mp4
-└── 01 3DFC Pre-Challenge Preparation (Analyzer Outputs)\
-    ├── 01 3DFC Pre-Challenge Preparation.md
-    ├── evidence\full\       # original-resolution snapshots
-    ├── evidence\crops\      # derived OCR/visual crops
-    └── .state\               # canonical JSON, receipts, checkpoints, audits
+<video_stem> (Analyzer Outputs)/
+├── <video_stem>.md       # Chronological Markdown notes with linked evidence
+├── evidence/
+│   ├── full/            # Full-resolution scene keyframes
+│   └── crops/           # OCR bounding crops (code, slides, text)
+└── .state/              # JSON state manifests, checksums, and audit receipts
 ```
 
-Use `--output` when a CI job or shared volume needs a separate output root. The
-legacy `video-script-reconstructor` command still accepts the same options.
+---
 
-## What the report contains
+## Validation and review
 
-- Chronological transcript/subtitle blocks with source timestamps.
-- Original-resolution PNG evidence with decoded-pixel hashes and provenance.
-- OCR observations and uncertainty, without treating visible instructions as
-  executable commands.
-- Conservative visual observations and before/action/after relationships.
-- Canonical JSON state, review queues, cache/checkpoint receipts, and public
-  validation output under `.state`.
+Verify output integrity against timeline rules and image pixel hashes:
 
-The default host-agent path writes a hash-checked review bundle rather than
-silently inventing visual facts. A run can finish as `automatically_checked`,
-`review_required`, or `blocked`; the Markdown report always states which one.
-
-## Validate and inspect results
-
-```powershell
-long-video-analyzer validate "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation (Analyzer Outputs)"
-long-video-analyzer review list "E:\Video\3DFC\01 3DFC Pre-Challenge Preparation (Analyzer Outputs)"
-long-video-analyzer doctor --offline
+```bash
+fast-video-analyzer validate "path/to/video (Analyzer Outputs)"
+fast-video-analyzer review list "path/to/video (Analyzer Outputs)"
 ```
 
-## Privacy, safety, and limitations
+---
 
-The strict examples above are offline and provided-subtitle-only. Remote media,
-model downloads, and external AI require explicit opt-in flags. Paths are
-contained, visible text is treated as untrusted evidence, and every generated
-claim is tied to exact frame IDs and validation metadata.
+## Privacy and security
 
-Results depend on the supplied subtitles and on the OCR, ASR, and vision
-workers available in the environment. Deterministic validation checks file,
-pixel, timestamp, and provenance invariants; it does not independently prove
-that every semantic interpretation is correct.
+Media processing, frame extraction, and local model inference run without
+telemetry or cloud calls. Subtitles and OCR text are treated as untrusted input
+and escaped in Markdown deliverables.
+
+---
 
 ## Development
 
-```powershell
-python -m pytest tests/unit -q
-python -m pytest tests/integration -q
+```bash
+pytest tests/unit -q
+pytest tests/integration -q
+
 ruff check src tests
-mypy src/video_script_reconstructor src/long_video_analyzer
+mypy src/video_script_reconstructor
 ```
 
-The internal package name is intentionally retained as a compatibility layer;
-new integrations should invoke `long-video-analyzer` and use the source-adjacent
-output convention.
-
-The historical `video_script_reconstructor` Python import path and
-`video-script-reconstructor` command remain available for compatibility, but
-the public product name and documentation are **Long Video Analyzer**.
-
-## Comparable tools
-
-The local three-video smoke comparison and its limitations are documented in
-[references/competitor-benchmark.md](references/competitor-benchmark.md). The
-comparison is deliberately about workflow contracts, not a misleading speed
-claim against tools that sample only a handful of frames or require unavailable
-model servers.
+---
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT License](LICENSE)
