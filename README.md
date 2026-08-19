@@ -1,16 +1,20 @@
 # Fast Video Analyzer
 
-Fast Video Analyzer is an offline-first command-line tool that turns video into
-a timestamped Markdown report. It combines supplied subtitles or local speech
-recognition with OCR, selected frames, and provenance data so results can be
-inspected later.
+Turn a long video into notes you can check.
 
-## What it produces
+Give Fast Video Analyzer a video and, when available, a subtitle file. It
+creates a time-ordered Markdown note from the spoken content, text on screen,
+and selected video frames. The screenshots and supporting files are kept with
+the note, so you can return to the source whenever something needs a closer
+look.
 
-- Transcript or subtitle blocks with source timestamps.
-- Full-resolution frames and OCR crops retained as local evidence.
-- A Markdown report that links observations to their evidence.
-- Validation data, review queues, and receipts under `.state/`.
+## What you get
+
+- A Markdown note organised by time.
+- Supplied subtitles or a locally generated transcript.
+- Screenshots of selected moments and crops of on-screen text.
+- A local output folder containing the images and data needed to review the
+  result.
 
 ---
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "fast-video-analyzer"
 version = "0.1.0"
-description = "Create timestamped Markdown reports from video transcripts, OCR, selected frames, and provenance data."
+description = "Turn long videos into time-ordered Markdown notes with transcripts, screenshots, and on-screen text."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
