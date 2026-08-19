@@ -137,7 +137,7 @@ def render_markdown(project: Any) -> str:
             "",
             "## How to read this analysis",
             "",
-            'Read each complete chronological block first. Important current image findings are already mirrored in the block. If wording or a claim remains uncertain, follow its frame and image-claim IDs. Read embedded image metadata with `long-video-analyzer evidence metadata show "<PROJECT_DIR>" <IMAGE_ID>` before requesting another visual pass. If metadata is insufficient, stale, contradictory, or lacks the needed precision, inspect the full frame, relevant crops, and adjacent before/action/after frames, then ingest a targeted enrichment observation. Finally, re-read the regenerated block and unresolved items.',
+            'Read each complete chronological block first. Important current image findings are already mirrored in the block. If wording or a claim remains uncertain, follow its frame and image-claim IDs. Read embedded image metadata with `fast-video-analyzer evidence metadata show "<PROJECT_DIR>" <IMAGE_ID>` before requesting another visual pass. If metadata is insufficient, stale, contradictory, or lacks the needed precision, inspect the full frame, relevant crops, and adjacent before/action/after frames, then ingest a targeted enrichment observation. Finally, re-read the regenerated block and unresolved items.',
             "",
             "## Source and verification summary",
             "",
@@ -280,7 +280,7 @@ def render_markdown(project: Any) -> str:
                                 "",
                                 f"*{frame_id} · role: {frame.get('evidence_role', frame.get('role', 'other'))} · requested {timestamp(frame.get('requested_ms'))} · actual {timestamp(frame.get('actual_ms'))} · offset {frame.get('offset_ms', 'unknown')} ms · selected because {safe_evidence_text(str(frame.get('selection_reason') or 'it supports this block'))} · [open full-size]({path})*",
                                 "",
-                                f'*Embedded evidence knowledge · metadata revision `{frame.get("latest_revision_id") or "none"}` · supported image claims `{", ".join(frame.get("supported_claim_ids", [])) or "none"}` · unresolved `{len(frame.get("unresolved_claim_ids", []))}` · use `long-video-analyzer evidence metadata show "<PROJECT_DIR>" {frame_id}` for the complete structured record.*',
+                                f'*Embedded evidence knowledge · metadata revision `{frame.get("latest_revision_id") or "none"}` · supported image claims `{", ".join(frame.get("supported_claim_ids", [])) or "none"}` · unresolved `{len(frame.get("unresolved_claim_ids", []))}` · use `fast-video-analyzer evidence metadata show "<PROJECT_DIR>" {frame_id}` for the complete structured record.*',
                                 "",
                             ]
                         )

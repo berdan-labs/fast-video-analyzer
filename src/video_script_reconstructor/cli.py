@@ -102,9 +102,9 @@ def _compact_semantic_batch_result(result: Mapping[str, Any]) -> dict[str, Any]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="long-video-analyzer",
+        prog="fast-video-analyzer",
         description=(
-            "Long Video Analyzer: analyze long-form video into structured Markdown and JSON reports "
+            "Fast Video Analyzer: turn video and optional subtitles into structured Markdown and JSON reports "
             "with transcript context, OCR, visual evidence, and provenance metadata."
         ),
     )

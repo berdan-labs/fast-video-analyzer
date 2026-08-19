@@ -1,4 +1,4 @@
 interface:
-  display_name: "Long Video Analyzer"
+  display_name: "Fast Video Analyzer"
   short_description: "Evidence-grounded long-form video analysis"
-  default_prompt: "Use $long-video-analyzer to analyze this media into one complete, evidence-grounded Markdown report with no UI output."
+  default_prompt: "Use $fast-video-analyzer to analyze this media into one complete, evidence-grounded Markdown report with no UI output."

@@ -1,4 +1,4 @@
-"""Long Video Analyzer implementation package.
+"""Fast Video Analyzer implementation package.
 
 The historical ``video_script_reconstructor`` import path remains supported so
 existing projects and serialized evidence can be read without migration.

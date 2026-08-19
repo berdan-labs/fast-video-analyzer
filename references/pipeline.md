@@ -200,7 +200,7 @@ checkpoint bytes; add `--apply` to remove only those caches while retaining ASR,
 repair, survey, evidence, and metadata state. The local vision adapter retries
 one malformed response with a schema-correction prompt before recording an
 explicit claim-free fallback.
-For a source folder, `long-video-analyzer batch` is the bounded execution
+For a source folder, `fast-video-analyzer batch` is the bounded execution
 wrapper. It probes and sorts every supported video, forecasts the next project
 from duration-aware historical rates, requires a configurable free-space reserve,
 and writes `.challenge-batch.json` after each completed source. It runs one
@@ -447,9 +447,9 @@ that set shrinks, and removes it when the frontier is empty. Older user-decided
 review items and all observation/correction history remain untouched, preventing
 bounded continuation metadata from growing quadratically.
 To continue only that deferred work, create a bounded host bundle:
-`long-video-analyzer review bundle create <PROJECT_DIR> --max-packets N`.
+`fast-video-analyzer review bundle create <PROJECT_DIR> --max-packets N`.
 After a Codex/subagent writes matching response JSON files, apply it with
-`long-video-analyzer review bundle apply <PROJECT_DIR> --bundle <BUNDLE>`.
+`fast-video-analyzer review bundle apply <PROJECT_DIR> --bundle <BUNDLE>`.
 The host reuses persisted transcript, frames, OCR, packets, and metadata, so no
 ingest, ASR, scene detection, frame extraction, or OCR reruns occur. A stale,
 missing, or uncertain response remains review-required rather than becoming a
@@ -501,7 +501,7 @@ samples instead of dumping every applied observation or deferred packet. Add
 `--full-output` when a machine-readable per-packet audit is specifically needed;
 the canonical project and manifest always retain the complete records either way.
 Projects created with an older Tesseract TSV parser can be repaired in place with
-`long-video-analyzer evidence ocr refresh <PROJECT_DIR> --workers N`.
+`fast-video-analyzer evidence ocr refresh <PROJECT_DIR> --workers N`.
 This reads existing evidence PNGs, updates only canonical OCR and packet context,
 rerenders the single Markdown output, and validates metadata; it does not decode
 the source video, rerun ASR, or rewrite image pixels. A changed OCR result is

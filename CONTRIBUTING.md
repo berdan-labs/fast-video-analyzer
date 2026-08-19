@@ -1,9 +1,7 @@
-# Contributing to Long Video Analyzer
+# Contributing to Fast Video Analyzer
 
-Thanks for helping improve Long Video Analyzer. The project keeps the historical
-`video_script_reconstructor` Python package and `video-script-reconstructor`
-command as compatibility aliases; new documentation and integrations should
-prefer `long_video_analyzer` and `long-video-analyzer`.
+Thanks for helping improve Fast Video Analyzer. Keep user-facing documentation,
+examples, and integrations aligned with the `fast-video-analyzer` command.
 
 ## Development setup
 
@@ -13,7 +11,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-Run the publication checks before opening a pull request:
+Run the project checks before opening a pull request:
 
 ```powershell
 python -m pytest tests/unit -q
