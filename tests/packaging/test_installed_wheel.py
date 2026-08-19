@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 from conftest import InstalledWheel
@@ -52,7 +53,9 @@ print(json.dumps({
     assert entry_points["long-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["video-script-reconstructor"] == "video_script_reconstructor.cli:main"
     assert result["version"] == "0.1.0"
-    assert Path(result["wrapper_file"]).resolve().is_relative_to(installed_wheel.environment.resolve())
+    assert (
+        Path(result["wrapper_file"]).resolve().is_relative_to(installed_wheel.environment.resolve())
+    )
 
 
 def test_console_and_module_entry_points_work_outside_repository(
@@ -91,6 +94,22 @@ def test_console_and_module_entry_points_work_outside_repository(
     report = json.loads(doctor.stdout)
     assert report["checks"]["network_policy"]["value"] == "offline"
     assert report["checks"]["ffmpeg"]["status"] in {"available", "blocking-for-strict"}
+    for alias in (installed_wheel.legacy_console, installed_wheel.compatibility_console):
+        alias_doctor = installed_wheel.run([alias, "doctor", "--offline"])
+        assert alias_doctor.returncode == 0, alias_doctor.stderr
+        alias_report = json.loads(alias_doctor.stdout)
+        assert alias_report["checks"]["network_policy"]["value"] == "offline"
+
+    diagnostic_path = installed_wheel.workdir / "diagnostic.zip"
+    diagnostic = installed_wheel.run(
+        [installed_wheel.console, "diagnostic-bundle", "--output", diagnostic_path]
+    )
+    assert diagnostic.returncode == 0, diagnostic.stdout + diagnostic.stderr
+    with zipfile.ZipFile(diagnostic_path) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+    assert manifest["media_included"] is False
+    assert manifest["paths_included"] is False
+    assert manifest["credentials_included"] is False
 
 
 def test_installed_wheel_dependencies_are_consistent(installed_wheel: InstalledWheel) -> None:

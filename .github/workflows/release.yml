@@ -73,6 +73,14 @@ jobs:
           "$RUNNER_TEMP/release-venv/bin/python" -m pip install dist/*.whl
           "$RUNNER_TEMP/release-venv/bin/fast-video-analyzer" --help
           "$RUNNER_TEMP/release-venv/bin/fast-video-analyzer" doctor --offline
+      - name: Keep publishable packages separate from release metadata
+        run: |
+          mkdir -p dist/packages
+          mv dist/*.whl dist/*.tar.gz dist/packages/
+      - name: Export locked runtime dependencies for SBOM
+        run: uv export --locked --format requirements.txt --no-emit-project --output-file "$RUNNER_TEMP/runtime-requirements.txt" > /dev/null
+      - name: Generate CycloneDX runtime dependency SBOM
+        run: uv run pip-audit --format cyclonedx-json --progress-spinner off --output dist/fast-video-analyzer-sbom.cdx.json -r "$RUNNER_TEMP/runtime-requirements.txt"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ env.RELEASE_TAG }}
@@ -96,7 +104,7 @@ jobs:
           path: dist
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v4.2.2
         with:
-          subject-path: dist/*
+          subject-path: dist/packages/*
 
   github-release:
     if: ${{ github.event_name == 'push' }}
@@ -114,7 +122,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$RELEASE_TAG" --repo "$GH_REPO" --verify-tag --generate-notes --title "$RELEASE_TAG" dist/*
+        run: gh release create "$RELEASE_TAG" --repo "$GH_REPO" --verify-tag --generate-notes --title "$RELEASE_TAG" dist/packages/* dist/fast-video-analyzer-sbom.cdx.json
 
   pypi:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}
@@ -132,4 +140,4 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/
+          packages-dir: dist/packages/

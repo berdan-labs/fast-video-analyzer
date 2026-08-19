@@ -16,6 +16,16 @@ Stop the run, preserve sanitized logs, and inspect provider selection and
 configuration. Confirm that external providers and model downloads are explicit
 opt-ins. Do not upload source media or complete generated project directories.
 
+To create a bounded support artifact, run:
+
+```bash
+fast-video-analyzer diagnostic-bundle --output fast-video-analyzer-diagnostic.zip
+```
+
+Inspect the archive before sharing it. The command deliberately includes only
+sanitized runtime and offline-doctor metadata; it excludes media, transcripts,
+screenshots, generated projects, credentials, and host filesystem paths.
+
 ## Corrupt state, cache, or insufficient disk
 
 Work on a copy of the project output, inspect manifests and checksums, and use
