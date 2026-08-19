@@ -8,12 +8,11 @@
 
 ## Maintainer model
 
-Until a second trusted maintainer is appointed, automation may label and
+This is an intentional single-administrator repository. Automation may label and
 acknowledge issues but must not approve its own changes, merge pull requests,
-publish packages, alter access, or bypass required checks.
-
-The next continuity milestone is a recovery-capable second human administrator
-with hardware-key or passkey MFA and offline recovery codes. Do not place
+publish packages, alter access, or bypass required checks. The human owner uses
+pull requests and required CI, keeps hardware-key or passkey MFA and offline
+recovery codes, and maintains an encrypted off-GitHub backup. Do not place
 personal tokens or credentials in workflows.
 
 ## High-risk paths

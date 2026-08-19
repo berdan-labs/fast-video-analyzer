@@ -39,11 +39,14 @@ REQUIRED_FILES = (
     "ROADMAP.md",
     "SUPPORT.md",
     "docs/action-allowlist.md",
+    "docs/backup-and-restore.md",
     "docs/cli-reference.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
+    "docs/pypi-trusted-publishing.md",
     "docs/releasing.md",
     "docs/runbooks.md",
+    "scripts/backup_repo.py",
     ".python-version",
 )
 
@@ -151,6 +154,7 @@ def check_release_contract() -> list[str]:
         "mkdir -p dist/packages",
         "packages-dir: dist/packages/",
         "subject-path: dist/packages/*",
+        "ref: ${{ env.RELEASE_TAG }}",
     )
     return [
         f"release workflow is missing required fragment: {fragment!r}"

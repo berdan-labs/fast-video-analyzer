@@ -7,14 +7,17 @@ change.
 
 ## Branch policy
 
-`main` should require a pull request, prevent force-pushes and deletion, require
-resolved conversations, and require the stable aggregate `required` CI check.
-Once a second trusted maintainer exists, require one approval and CODEOWNERS
-review for high-risk paths. Keep a documented break-glass path: incident issue,
-minimal signed fix, and a follow-up review/postmortem.
+`main` requires a pull request, prevents force-pushes and deletion, requires
+resolved conversations, and requires the stable aggregate `required` CI check.
+The deliberate single-administrator policy requires zero approving reviews: a
+nonzero quorum would be impossible to satisfy. CODEOWNERS remains an ownership
+map and an explicit owner-review prompt for high-risk paths, not an automated
+second-person gate. Keep a documented break-glass path: incident issue, minimal
+signed fix, and a follow-up review/postmortem.
 
-Use squash merging and delete merged head branches. Do not enable strict review
-requirements before CI is reliable and a recovery-capable second human exists.
+Use squash merging and delete merged head branches. Do not enable an
+unfulfillable approval or CODEOWNERS-review requirement while the repository is
+intentionally single-admin.
 
 ## Read-only heartbeat
 
@@ -34,8 +37,9 @@ or configuration gap, not permission to broaden credentials casually.
 
 ## Access and continuity
 
-Use hardware-key or passkey MFA, offline recovery codes, least-privilege
-fine-grained credentials, and at least two trusted human administrators before
-delegating critical access. Review collaborators, deploy keys, Apps, webhooks,
-environments, and trusted publishers quarterly. Never store personal tokens in
-workflows.
+Use hardware-key or passkey MFA, offline recovery codes, and least-privilege
+fine-grained credentials. This repository deliberately has one human
+administrator; that owner accepts the continuity risk and must keep the recovery
+codes and an encrypted off-GitHub backup separately. Review collaborators,
+deploy keys, Apps, webhooks, environments, and trusted publishers quarterly.
+Never store personal tokens in workflows.
