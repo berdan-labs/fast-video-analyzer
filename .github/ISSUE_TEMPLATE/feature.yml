@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a user-focused improvement.
+title: "[Feature] "
+labels:
+  - type/feature
+  - triage/untriaged
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Who needs this and what problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired CLI, API, output, or workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and contract impact
+      description: Note changes to schemas, reports, aliases, performance, privacy, or external providers.

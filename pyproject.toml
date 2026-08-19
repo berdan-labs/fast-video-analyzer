@@ -30,9 +30,11 @@ diarization = ["huggingface-hub>=0.28"]
 dev = [
   "build>=1.2",
   "mypy>=1.11",
+  "pip-audit>=2.9",
   "pytest>=8.3",
   "pytest-cov>=5.0",
   "ruff>=0.6",
+  "twine>=6.1",
   "types-jsonschema>=4.23",
   "types-PyYAML>=6.0.12",
 ]

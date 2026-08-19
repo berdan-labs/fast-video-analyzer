@@ -1,0 +1,12 @@
+# Default owner for all project changes.
+* @vinnce143
+
+# High-risk paths require explicit owner review.
+/.github/ @vinnce143
+/src/video_script_reconstructor/security.py @vinnce143
+/src/video_script_reconstructor/providers/ @vinnce143
+/src/video_script_reconstructor/pipeline.py @vinnce143
+/src/video_script_reconstructor/schemas.py @vinnce143
+/SKILL.md @vinnce143
+/pyproject.toml @vinnce143
+/uv.lock @vinnce143

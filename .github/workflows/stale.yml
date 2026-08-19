@@ -1,0 +1,41 @@
+name: Stale maintenance
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: >-
+            This issue has had no activity for 30 days. It will be closed in 14
+            days if no new information is provided.
+          close-issue-message: >-
+            Closing this issue after the inactivity period. Reopen it with a
+            reproducible example if the problem remains.
+          stale-pr-message: >-
+            This pull request has had no activity for 21 days. It will be closed
+            in 7 days if it is not updated.
+          close-pr-message: >-
+            Closing this pull request after the inactivity period. It can be
+            reopened or replaced with an updated focused change.
+          days-before-stale: 30
+          days-before-close: 14
+          days-before-pr-stale: 21
+          days-before-pr-close: 7
+          stale-issue-label: status/stale
+          stale-pr-label: status/stale
+          exempt-issue-labels: security,pinned,good first issue,help wanted,status/blocked
+          exempt-pr-labels: security,pinned,good first issue,help wanted,status/blocked
