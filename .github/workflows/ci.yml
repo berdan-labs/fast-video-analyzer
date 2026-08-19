@@ -32,8 +32,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install FFmpeg
-        run: timeout 180s bash -c 'sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg'
+      - name: Verify FFmpeg
+        run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
         run: uv sync --locked --extra dev
       - name: Verify repository maintenance contract
@@ -61,8 +61,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install FFmpeg
-        run: timeout 180s bash -c 'sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg'
+      - name: Verify FFmpeg
+        run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
         run: uv sync --locked --extra dev
       - name: Run mandatory acceptance suites
