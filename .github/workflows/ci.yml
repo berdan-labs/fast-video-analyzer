@@ -32,8 +32,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install FFmpeg from the runner package index
-        run: timeout 120s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
+      - uses: FedericoCarboni/setup-ffmpeg@37062fbf7149fc5578d6c57e08aed62458b375d6 # v3.1
+        with:
+          ffmpeg-version: "7.1.1"
       - name: Verify FFmpeg
         run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
@@ -63,8 +64,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install FFmpeg from the runner package index
-        run: timeout 120s bash -c 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg'
+      - uses: FedericoCarboni/setup-ffmpeg@37062fbf7149fc5578d6c57e08aed62458b375d6 # v3.1
+        with:
+          ffmpeg-version: "7.1.1"
       - name: Verify FFmpeg
         run: timeout 15s bash -c 'command -v ffmpeg && ffmpeg -version | head -n 1'
       - name: Install locked development environment
