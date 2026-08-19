@@ -2,7 +2,7 @@
 
 ## Current owner
 
-- GitHub: [@vinnce143](https://github.com/vinnce143)
+- GitHub owner: [@berdan-labs](https://github.com/berdan-labs)
 - Repository administration, security response, release approval, and
   emergency branch-protection bypass remain human responsibilities.
 
