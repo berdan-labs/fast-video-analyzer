@@ -13,7 +13,7 @@ def test_skill_frontmatter_and_trigger_fixture_counts() -> None:
     _, frontmatter, body = skill.split("---", 2)
     metadata = yaml.safe_load(frontmatter)
     assert set(metadata) == {"name", "description"}
-    assert metadata["name"] == "long-video-analyzer"
+    assert metadata["name"] == "fast-video-analyzer"
     assert len(body.splitlines()) < 500
     evaluation = json.loads(
         (ROOT / "tests" / "skill_trigger_eval.json").read_text(encoding="utf-8")

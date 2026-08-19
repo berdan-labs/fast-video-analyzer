@@ -11,6 +11,7 @@
     "qwen3-vl-4b-q4"
   ],
   "public_entry_points": [
+    "fast-video-analyzer",
     "long-video-analyzer",
     "python -m long_video_analyzer",
     "video-script-reconstructor",

@@ -3,13 +3,13 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "long-video-analyzer"
+name = "fast-video-analyzer"
 version = "0.1.0"
-description = "Analyze long-form video with transcripts, OCR, and visual evidence."
+description = "Create timestamped Markdown reports from video transcripts, OCR, selected frames, and provenance data."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "Long Video Analyzer contributors" }]
+authors = [{ name = "Berdan Labs" }]
 dependencies = [
   "jsonschema>=4.23",
   "Pillow>=10.4",
@@ -39,11 +39,12 @@ dev = [
 media = []
 
 [project.urls]
-Homepage = "https://github.com/vinnce143/long-video-analyzer"
-Repository = "https://github.com/vinnce143/long-video-analyzer"
-Issues = "https://github.com/vinnce143/long-video-analyzer/issues"
+Homepage = "https://github.com/berdan-labs/fast-video-analyzer"
+Repository = "https://github.com/berdan-labs/fast-video-analyzer"
+Issues = "https://github.com/berdan-labs/fast-video-analyzer/issues"
 
 [project.scripts]
+fast-video-analyzer = "video_script_reconstructor.cli:main"
 long-video-analyzer = "video_script_reconstructor.cli:main"
 video-script-reconstructor = "video_script_reconstructor.cli:main"
 

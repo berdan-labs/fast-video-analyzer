@@ -28,7 +28,7 @@ resources = {
 entry_points = [
     (item.name, item.value)
     for item in importlib.metadata.entry_points(group="console_scripts")
-    if item.name in {"long-video-analyzer", "video-script-reconstructor"}
+    if item.name in {"fast-video-analyzer", "long-video-analyzer", "video-script-reconstructor"}
 ]
 print(json.dumps({
     "package_file": video_script_reconstructor.__file__,
@@ -48,6 +48,7 @@ print(json.dumps({
     assert result["preset"] == "strict"
     assert min(result["resource_lengths"].values()) > 0
     entry_points = dict(result["entry_points"])
+    assert entry_points["fast-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["long-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["video-script-reconstructor"] == "video_script_reconstructor.cli:main"
     assert result["version"] == "0.1.0"
@@ -59,11 +60,13 @@ def test_console_and_module_entry_points_work_outside_repository(
 ) -> None:
     console_help = installed_wheel.run([installed_wheel.console, "--help"])
     legacy_help = installed_wheel.run([installed_wheel.legacy_console, "--help"])
+    compatibility_help = installed_wheel.run([installed_wheel.compatibility_console, "--help"])
     module_help = installed_wheel.run(
         [installed_wheel.python, "-m", "video_script_reconstructor", "--help"]
     )
     assert console_help.returncode == 0, console_help.stderr
     assert legacy_help.returncode == 0, legacy_help.stderr
+    assert compatibility_help.returncode == 0, compatibility_help.stderr
     assert module_help.returncode == 0, module_help.stderr
     for output in (console_help.stdout, module_help.stdout):
         assert "doctor" in output
@@ -72,7 +75,7 @@ def test_console_and_module_entry_points_work_outside_repository(
         assert "validate" in output
         assert "models" in output
         assert "workers" in output
-    assert "Long Video Analyzer" in console_help.stdout
+    assert "Fast Video Analyzer" in console_help.stdout
 
     workers = installed_wheel.run([installed_wheel.console, "workers", "list"])
     assert workers.returncode == 0, workers.stderr

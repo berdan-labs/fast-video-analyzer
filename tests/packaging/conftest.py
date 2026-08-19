@@ -22,6 +22,7 @@ class InstalledWheel:
     python: Path
     console: Path
     legacy_console: Path
+    compatibility_console: Path
     workdir: Path
 
     def run(self, arguments: list[str | Path], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -81,12 +82,14 @@ def installed_wheel(tmp_path_factory: pytest.TempPathFactory) -> InstalledWheel:
     venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
     if os.name == "nt":
         python = environment / "Scripts" / "python.exe"
-        console = environment / "Scripts" / "long-video-analyzer.exe"
+        console = environment / "Scripts" / "fast-video-analyzer.exe"
         legacy_console = environment / "Scripts" / "video-script-reconstructor.exe"
+        compatibility_console = environment / "Scripts" / "long-video-analyzer.exe"
     else:
         python = environment / "bin" / "python"
-        console = environment / "bin" / "long-video-analyzer"
+        console = environment / "bin" / "fast-video-analyzer"
         legacy_console = environment / "bin" / "video-script-reconstructor"
+        compatibility_console = environment / "bin" / "long-video-analyzer"
     install = subprocess.run(
         [str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
         cwd=root,
@@ -110,5 +113,6 @@ def installed_wheel(tmp_path_factory: pytest.TempPathFactory) -> InstalledWheel:
         python=python,
         console=console,
         legacy_console=legacy_console,
+        compatibility_console=compatibility_console,
         workdir=workdir,
     )

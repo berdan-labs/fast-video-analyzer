@@ -199,11 +199,11 @@ def test_default_output_root_uses_documents_script_reconstructor_outputs(
 
 
 def test_colocated_output_dir_uses_source_stem_and_analyzer_suffix(tmp_path: Path) -> None:
-    source = tmp_path / "01 3DFC Pre-Challenge Preparation.mp4"
+    source = tmp_path / "training-session.mp4"
     source.write_bytes(b"fixture")
 
     assert pipeline.colocated_output_dir(source) == (
-        tmp_path / "01 3DFC Pre-Challenge Preparation (Analyzer Outputs)"
+        tmp_path / "training-session (Analyzer Outputs)"
     )
 
 
