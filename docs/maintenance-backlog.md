@@ -23,6 +23,11 @@ Last reviewed: 2026-08-20
 - [x] Protect `main` from force-push/deletion and require the aggregate CI gate.
 - [x] Validate clean wheel installation, CLI help, and offline doctor behavior.
 - [x] Close the pre-existing triage test issue after verifying the workflow.
+- [x] Add scheduled Ubuntu, Windows, and macOS CLI smoke coverage.
+- [x] Enforce a documented allowlist of SHA-pinned GitHub Actions.
+- [x] Add a sanitized diagnostic-bundle command with privacy tests.
+- [x] Generate a CycloneDX runtime dependency SBOM and attach it to releases.
+- [x] Expand public CLI examples and compatibility tests for all entrypoint aliases.
 
 ## Owner decisions and external setup
 
@@ -41,12 +46,7 @@ Last reviewed: 2026-08-20
 
 ## Planned engineering follow-ups
 
-- [ ] Add scheduled Windows and macOS smoke coverage.
-- [ ] Add a sanitized diagnostic-bundle command and tests for retention/privacy
-  boundaries.
-- [ ] Add generated SBOM attachments to releases after selecting a maintained
-  generator and verifying its trust model.
-- [ ] Expand public examples and compatibility tests for all CLI aliases.
+- [ ] Add a documented backup export and quarterly restore drill.
 - [ ] Add a documented action allowlist after inventorying the exact actions used
   by the workflows and Dependabot.
 

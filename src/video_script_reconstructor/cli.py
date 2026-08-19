@@ -119,6 +119,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--offline", action="store_true", help="Report the strict offline policy.")
 
+    diagnostic_bundle = commands.add_parser(
+        "diagnostic-bundle",
+        aliases=("diagnostics", "support-bundle"),
+        help="Write a sanitized support bundle without copying user media or credentials.",
+    )
+    diagnostic_bundle.add_argument("--output", required=True, type=Path, help="Output .zip path.")
+    diagnostic_bundle.add_argument(
+        "--force", action="store_true", help="Explicitly replace an existing output archive."
+    )
+
     plan = commands.add_parser(
         "plan", help="Inspect lightly and print a no-download, no-full-processing plan."
     )
@@ -594,6 +604,11 @@ def _run(args: argparse.Namespace) -> int:
         from .pipeline import doctor_report
 
         _json(doctor_report(output_path=args.output, offline=args.offline or True))
+        return 0
+    if args.command in {"diagnostic-bundle", "diagnostics", "support-bundle"}:
+        from .diagnostics import create_diagnostic_bundle
+
+        _json(create_diagnostic_bundle(args.output, force=args.force))
         return 0
     if args.command == "plan":
         from .pipeline import plan_input

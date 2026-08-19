@@ -47,6 +47,14 @@ Verify your local environment:
 fast-video-analyzer doctor --offline
 ```
 
+Create a support bundle when asking for help. It contains sanitized capability
+metadata only; it does not copy source media, transcripts, screenshots,
+generated projects, credentials, or filesystem paths:
+
+```bash
+fast-video-analyzer diagnostic-bundle --output fast-video-analyzer-diagnostic.zip
+```
+
 ---
 
 ## Quickstart
@@ -68,6 +76,17 @@ fast-video-analyzer run "path/to/video.mp4" \
   --preset strict \
   --offline
 ```
+
+The installed wheel also keeps the historical entrypoints working:
+
+```bash
+long-video-analyzer doctor --offline
+video-script-reconstructor doctor --offline
+```
+
+All three entrypoints invoke the same parser and implementation. Nested
+compatibility aliases such as `review bundle batch-create` and
+`review bundle create-batch` are covered by the CLI compatibility tests.
 
 ## Python API
 
@@ -142,8 +161,8 @@ uv run pytest tests/e2e tests/mutation tests/packaging -q
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [OPERATIONS.md](OPERATIONS.md),
-[docs/releasing.md](docs/releasing.md), and [SUPPORT.md](SUPPORT.md) for
-maintainer and contributor workflows.
+[docs/releasing.md](docs/releasing.md), [docs/runbooks.md](docs/runbooks.md),
+and [SUPPORT.md](SUPPORT.md) for maintainer and contributor workflows.
 
 ---
 
