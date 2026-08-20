@@ -101,6 +101,147 @@ def _compact_semantic_batch_result(result: Mapping[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_doctor_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a path-free operator summary without changing the full report."""
+
+    checks = report.get("checks")
+    checks = checks if isinstance(checks, Mapping) else {}
+    required_names = (
+        "python",
+        "ffmpeg",
+        "ffprobe",
+        "package_import",
+        "package_data",
+        "image_metadata",
+        "disk",
+        "output_write",
+        "network_policy",
+        "ocr",
+        "vision_provider",
+    )
+    blocking_statuses = {"blocked", "blocking-for-strict", "unavailable"}
+    check_statuses: dict[str, str] = {}
+    blocking_checks: list[str] = []
+    for name in required_names:
+        value = checks.get(name)
+        status = (
+            str(value.get("status", "unknown")) if isinstance(value, Mapping) else "unknown"
+        )
+        check_statuses[name] = status
+        if status in blocking_statuses:
+            blocking_checks.append(name)
+
+    optional_capabilities = [
+        name
+        for name in ("speech_recognition", "diarization", "ocr", "vision_provider")
+        if isinstance(checks.get(name), Mapping) and str(checks[name].get("status")) == "optional"
+    ]
+    next_actions: list[str] = []
+    for name in blocking_checks:
+        value = checks.get(name)
+        fix = value.get("fix") if isinstance(value, Mapping) else None
+        next_actions.append(
+            f"Fix {name}: {fix or 'rerun doctor after correcting this prerequisite.'}"
+        )
+    if not blocking_checks:
+        next_actions.append(
+            "Run `fast-video-analyzer plan <input> --offline` before processing."
+        )
+    if "speech_recognition" in optional_capabilities:
+        next_actions.append(
+            "Subtitle-led runs need no ASR model; install, fetch, and verify faster-whisper "
+            "only when audio transcription is required."
+        )
+    next_actions.append(
+        "If a run returns `review_required`, follow docs/review-workflow.md for the bounded "
+        "review handoff."
+    )
+    return {
+        "schema_version": str(report.get("schema_version") or "1.0"),
+        "output_mode": "summary",
+        "status": "blocked" if blocking_checks else "ready",
+        "check_statuses": check_statuses,
+        "blocking_checks": blocking_checks,
+        "optional_capabilities": optional_capabilities,
+        "next_actions": next_actions,
+    }
+
+
+def _quote_cli_path(value: str | Path) -> str:
+    return '"' + str(value).replace('"', '\\"') + '"'
+
+
+def _compact_plan(
+    plan: Mapping[str, Any],
+    *,
+    input_value: str,
+    subtitles: Sequence[Path],
+    transcript: Path | None,
+    output_root: Path | None,
+    preset: str,
+    vision_mode: str,
+) -> dict[str, Any]:
+    """Return concise, copyable next actions for a previously computed plan."""
+
+    input_classification = str(plan.get("input_classification") or "unknown")
+    asr_expected = bool(plan.get("asr_expected"))
+    visual_review_expected = bool(plan.get("visual_review_expected"))
+    command_parts = ["fast-video-analyzer", "run", _quote_cli_path(input_value)]
+    for subtitle in subtitles:
+        command_parts.extend(("--subtitle", _quote_cli_path(subtitle)))
+    if transcript is not None:
+        command_parts.extend(("--transcript", _quote_cli_path(transcript)))
+    if output_root is not None:
+        command_parts.extend(("--output", _quote_cli_path(output_root)))
+    command_parts.extend(("--preset", preset, "--offline"))
+    if vision_mode != "host-agent":
+        command_parts.extend(("--vision-mode", vision_mode))
+    run_command = " ".join(command_parts)
+    output_path = str(plan.get("output_path") or "<project_dir>")
+    next_actions = [
+        (
+            "Install and verify the explicitly required ASR capability before running."
+            if asr_expected
+            else "Subtitle-led workflow selected; no ASR model download is required."
+        ),
+        f"Run: {run_command}",
+        f"Validate: fast-video-analyzer validate {_quote_cli_path(output_path)}",
+    ]
+    if visual_review_expected:
+        next_actions.append(
+            "If the result is `review_required`, run `review list` and follow "
+            "docs/review-workflow.md."
+        )
+    prerequisites = ["FFmpeg/FFprobe for media"]
+    if asr_expected:
+        prerequisites.append(
+            "hash-verified faster-whisper large-v3 or an injected ASR adapter"
+        )
+    if visual_review_expected:
+        prerequisites.append(
+            "bounded host-agent/Codex-subagent review for visual claims"
+        )
+    return {
+        "schema_version": str(plan.get("schema_version") or "1.0"),
+        "output_mode": "summary",
+        "input_classification": input_classification,
+        "workflow": "asr-required" if asr_expected else "subtitle-led",
+        "asr_expected": asr_expected,
+        "ocr_expected": bool(plan.get("ocr_expected")),
+        "visual_review_expected": visual_review_expected,
+        "estimated_evidence_images": plan.get("estimated_evidence_images", 0),
+        "estimated_disk_bytes": plan.get("estimated_disk_bytes", 0),
+        "output_path": output_path,
+        "output_contract": plan.get("output_contract"),
+        "prerequisites": prerequisites,
+        "network_actions_requiring_permission": plan.get(
+            "network_actions_requiring_permission", []
+        ),
+        "no_full_processing_statement": plan.get("no_full_processing_statement"),
+        "next_actions": next_actions,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fast-video-analyzer",
@@ -119,6 +260,9 @@ def _parser() -> argparse.ArgumentParser:
         "--output", type=Path, help="Output location whose disk/write access should be checked."
     )
     doctor.add_argument("--offline", action="store_true", help="Report the strict offline policy.")
+    doctor.add_argument(
+        "--summary", action="store_true", help="Print concise statuses and copyable next actions."
+    )
 
     diagnostic_bundle = commands.add_parser(
         "diagnostic-bundle",
@@ -146,6 +290,9 @@ def _parser() -> argparse.ArgumentParser:
         help="Use offline Codex/subagent review bundles by default; auto is a compatibility alias.",
     )
     plan.add_argument("--offline", action="store_true")
+    plan.add_argument(
+        "--summary", action="store_true", help="Print concise details and copyable next actions."
+    )
 
     run = commands.add_parser("run", help="Run the long-video analysis pipeline.")
     run.add_argument("input")
@@ -604,7 +751,8 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         from .pipeline import doctor_report
 
-        _json(doctor_report(output_path=args.output, offline=args.offline or True))
+        report = doctor_report(output_path=args.output, offline=args.offline or True)
+        _json(_compact_doctor_report(report) if args.summary else report)
         return 0
     if args.command in {"diagnostic-bundle", "diagnostics", "support-bundle"}:
         from .diagnostics import create_diagnostic_bundle
@@ -614,17 +762,28 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "plan":
         from .pipeline import plan_input
 
+        plan = plan_input(
+            args.input,
+            output_root=args.output,
+            subtitles=args.subtitle,
+            transcript=args.transcript,
+            preset=args.preset,
+            config_path=args.config,
+            vision_mode=args.vision_mode,
+            offline=args.offline or True,
+        )
         _json(
-            plan_input(
-                args.input,
-                output_root=args.output,
+            _compact_plan(
+                plan,
+                input_value=args.input,
                 subtitles=args.subtitle,
                 transcript=args.transcript,
+                output_root=args.output,
                 preset=args.preset,
-                config_path=args.config,
                 vision_mode=args.vision_mode,
-                offline=args.offline or True,
             )
+            if args.summary
+            else plan
         )
         return 0
     if args.command == "run":

@@ -39,9 +39,9 @@ Stable lifecycle and evidence commands:
 
 | Surface | Contract |
 | --- | --- |
-| `doctor` | Non-mutating capability and prerequisite report; `--offline` is the default safety posture. |
+| `doctor` | Non-mutating capability and prerequisite report; `--offline` is the default safety posture. `--summary` adds path-free statuses and next actions. |
 | `diagnostic-bundle` | Writes a sanitized support ZIP; `diagnostics` and `support-bundle` are compatibility aliases. |
-| `plan` | No-download, no-full-processing plan for one input. |
+| `plan` | No-download, no-full-processing plan for one input. `--summary` adds copyable run/validate actions. |
 | `run` | Reconstructs one input into one project and emits machine-readable result JSON. |
 | `batch` | Sequential, resumable processing of a source folder with storage guards. |
 | `validate` | Validates one project’s links, hashes, metadata, chronology, and state. |
