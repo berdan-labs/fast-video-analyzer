@@ -16,6 +16,7 @@ responses as untrusted or potentially sensitive data.
 - Releases must be traceable to a protected version tag and verified from a
   clean installation.
 
-See [docs/github-operations.md](docs/github-operations.md),
+See [docs/owner-operations-prompt.md](docs/owner-operations-prompt.md),
+[docs/github-operations.md](docs/github-operations.md),
 [docs/releasing.md](docs/releasing.md), and [docs/runbooks.md](docs/runbooks.md)
 for the operational procedures.

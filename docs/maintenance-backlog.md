@@ -38,6 +38,8 @@ Last reviewed: 2026-08-20
   work makes their maintenance value exceed their overhead.
 - [x] Add a non-secret backup export, integrity verification, and restore-drill
   procedure.
+- [x] Add an evidence-first owner-operations prompt that encodes the
+  single-administrator policy, safe mutation boundaries, and completion audit.
 
 ## Owner decisions and external setup
 
