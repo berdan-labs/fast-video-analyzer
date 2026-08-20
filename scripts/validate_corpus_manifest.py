@@ -17,6 +17,17 @@ CASE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 SOURCE_KINDS = {"generated", "licensed", "owner_controlled"}
 AVAILABILITIES = {"repository", "external"}
 COVERAGE_STATUSES = {"covered", "gap"}
+TEXT_SUFFIXES = {
+    ".csv",
+    ".json",
+    ".md",
+    ".srt",
+    ".tsv",
+    ".txt",
+    ".vtt",
+    ".yaml",
+    ".yml",
+}
 
 
 def _is_string(value: Any) -> bool:
@@ -56,6 +67,9 @@ def _safe_path(root: Path, value: Any, label: str, errors: list[str]) -> Path | 
 
 
 def _sha256(path: Path) -> str:
+    if path.suffix.casefold() in TEXT_SUFFIXES:
+        content = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        return hashlib.sha256(content).hexdigest()
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):

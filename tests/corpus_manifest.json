@@ -96,7 +96,7 @@
       "subtitles": [
         {
           "path": "tests/fixtures/generated/talking-head.srt",
-          "sha256": "ff5ea1417964522a7b8ab4a40374b99014d2aaaeed5892955e7c6fbb1127faf0"
+        "sha256": "92d217c7d3f5c07c470ec28fc34fdab5cdd6c7a26eb7fa8687dc09839750a8d8"
         }
       ],
       "expected": {
@@ -129,7 +129,7 @@
       "subtitles": [
         {
           "path": "tests/fixtures/generated/slide-lecture.srt",
-          "sha256": "db3bd832c27663abc2f0b01197c4271e9aaae758f8a847648bc4dc2ae8d20cf0"
+        "sha256": "0cb9b54848c540763fd00be3541ff587d60102fde40034e84f42f85ae72e5a62"
         }
       ],
       "expected": {
@@ -162,7 +162,7 @@
       "subtitles": [
         {
           "path": "tests/fixtures/generated/screen-tutorial.srt",
-          "sha256": "1e7238726dfe9bea4f1722fec1864d3c6982385b5fab44f14971535b81da6fdb"
+        "sha256": "904a2fd3f34cf3e62b4d822b6ff72fe61a1c76bc19ad3564c0ce82aacfdf5d18"
         }
       ],
       "expected": {

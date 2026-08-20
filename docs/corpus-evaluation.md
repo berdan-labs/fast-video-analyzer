@@ -17,7 +17,8 @@ The repository may contain small generated fixtures when they are reproducible,
 licensed by the project, and useful to ordinary CI. Each case records:
 
 - a stable case ID, source kind, availability, tags, and expected evidence;
-- SHA-256 for the media and every sidecar used by the case;
+- SHA-256 for the media and every sidecar used by the case (text sidecars are
+  hashed with CRLF/CR normalized to LF so Windows and Unix checkouts agree);
 - provenance that names the generator or rights/owner reference; and
 - coverage links showing which requirement the case exercises.
 
