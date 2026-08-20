@@ -8,7 +8,11 @@ this is deliberately a single-administrator repository.
 
 ## One-time PyPI account step
 
-An owner of the PyPI account must register a GitHub Actions Trusted Publisher.
+An owner of the PyPI account must first enable PyPI two-factor authentication
+and safely retain the recovery codes. PyPI blocks the Publishing settings page
+until 2FA is enabled; do not automate or handle the authenticator secret,
+security key, or recovery codes. After the owner completes that security step,
+register a GitHub Actions Trusted Publisher.
 For a new project, use PyPI's **pending publisher** flow; for an existing
 project, add the same publisher from that project's Publishing settings.
 
