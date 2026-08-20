@@ -6,6 +6,10 @@ intent.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.1.0] - 2026-08-20
+
 ### Added
 
 - Maintainer operating documentation, ownership rules, issue forms, and
