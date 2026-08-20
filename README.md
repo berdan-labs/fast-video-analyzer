@@ -58,6 +58,7 @@ python -m pip install -e ".[asr,ocr]"
 Verify your local environment:
 
 ```bash
+fast-video-analyzer --version
 fast-video-analyzer doctor --offline
 ```
 

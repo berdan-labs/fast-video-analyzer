@@ -37,6 +37,7 @@ entry_points = [
 ]
 print(json.dumps({
     "package_file": video_script_reconstructor.__file__,
+    "package_version": video_script_reconstructor.__version__,
     "preset": load_config("strict").preset,
     "resource_lengths": {key: len(value) for key, value in resources.items()},
     "entry_points": entry_points,
@@ -56,10 +57,19 @@ print(json.dumps({
     assert entry_points["fast-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["long-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["video-script-reconstructor"] == "video_script_reconstructor.cli:main"
-    assert result["version"] == "0.1.0"
+    assert result["package_version"] == result["version"]
     assert (
         Path(result["wrapper_file"]).resolve().is_relative_to(installed_wheel.environment.resolve())
     )
+
+    for executable in (
+        installed_wheel.console,
+        installed_wheel.legacy_console,
+        installed_wheel.compatibility_console,
+    ):
+        version = installed_wheel.run([executable, "--version"])
+        assert version.returncode == 0, version.stderr
+        assert version.stdout.strip() == f"fast-video-analyzer {result['version']}"
 
 
 def test_console_and_module_entry_points_work_outside_repository(
