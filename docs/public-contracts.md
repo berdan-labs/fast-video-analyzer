@@ -194,6 +194,8 @@ Supported operational variables:
 interval of in-progress `.state/asr-progress.json` heartbeats while a native
 decoder call is running; `0` disables them. Heartbeats do not interrupt,
 retry, or change transcript output and are not evidence that a chunk completed.
+Heartbeat events update only the small progress file; the run manifest remains
+checkpoint-based and is not a heartbeat log.
 
 Advanced or compatibility-only variables are recognized but provisional:
 

@@ -120,13 +120,17 @@ deletes source media or model weights.
 Long ASR jobs report bounded chunk progress and an ETA on stderr while keeping
 the machine-readable result on stdout.  Use `--asr-chunk-seconds` (or `--asr-chunk-sweep 150,300,600,900` for an isolated cold comparison; for example,
 `300`) when interruption/restart granularity matters; this changes checkpoint
-boundaries, not the Whisper model or fidelity policy.  The latest progress is
-also preserved in `.state/asr-progress.json` and the run manifest. Persisted
-operational telemetry keeps only the newest 32 chunk timings (and records the
-omitted count); the final ASR metadata and atomic chunk checkpoints retain the
-complete timing history. Chunk-start progress updates the small progress file,
-while the full manifest is refreshed on completed chunks to avoid redundant
-large JSON writes during long runs; runtime/platform identity is captured once per process for repeated manifest writes.
+boundaries, not the Whisper model or fidelity policy. The latest progress is
+preserved in `.state/asr-progress.json`; the run manifest records the durable
+chunk checkpoint state. In-progress native-decoder heartbeats update only the
+small progress file, so they cannot race the manifest writer or be mistaken
+for chunk completion. Persisted operational telemetry keeps only the newest
+32 chunk timings (and records the omitted count); the final ASR metadata and
+atomic chunk checkpoints retain the complete timing history. Chunk-start
+progress updates the small progress file, while the full manifest is refreshed
+on completed chunks to avoid redundant large JSON writes during long runs;
+runtime/platform identity is captured once per process for repeated manifest
+writes.
 On the tested RTX 3060/large-v3 FC101 workload, 150-second chunks with the
 default 15-second overlap were faster than 600-second chunks while preserving
 more merged words; treat that as a host-specific benchmark, not a universal
