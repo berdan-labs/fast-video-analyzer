@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
 from conftest import InstalledWheel
+
+REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def test_import_and_resources_come_from_installed_wheel(installed_wheel: InstalledWheel) -> None:
@@ -110,6 +114,64 @@ def test_console_and_module_entry_points_work_outside_repository(
     assert manifest["media_included"] is False
     assert manifest["paths_included"] is False
     assert manifest["credentials_included"] is False
+
+
+def test_readme_first_run_matches_an_installed_wheel(installed_wheel: InstalledWheel) -> None:
+    readme = (REPOSITORY / "README.md").read_text(encoding="utf-8")
+    assert "python -m pip install --upgrade fast-video-analyzer" in readme
+    assert "git+https://github.com/berdan-labs/fast-video-analyzer.git" not in readme
+    assert "fast-video-analyzer doctor --offline" in readme
+    assert (
+        'fast-video-analyzer run "path/to/video.mp4" --subtitle "path/to/video.srt" '
+        '--output "path/to/analyzer-output" --preset strict --offline'
+    ) in readme
+    assert 'fast-video-analyzer validate "path/to/analyzer-output/video"' in readme
+
+    fixtures = installed_wheel.workdir / "readme-fixtures"
+    generated = subprocess.run(
+        [
+            sys.executable,
+            str(REPOSITORY / "scripts" / "generate_fixtures.py"),
+            str(fixtures),
+        ],
+        cwd=installed_wheel.workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+
+    doctor = installed_wheel.run([installed_wheel.console, "doctor", "--offline"])
+    assert doctor.returncode == 0, doctor.stdout + doctor.stderr
+    assert json.loads(doctor.stdout)["checks"]["network_policy"]["value"] == "offline"
+
+    output = installed_wheel.workdir / "readme-output"
+    run = installed_wheel.run(
+        [
+            installed_wheel.console,
+            "run",
+            fixtures / "screen-tutorial.mp4",
+            "--subtitle",
+            fixtures / "screen-tutorial.srt",
+            "--output",
+            output,
+            "--preset",
+            "strict",
+            "--offline",
+        ]
+    )
+    assert run.returncode == 3, run.stdout + run.stderr
+    result = json.loads(run.stdout)
+    project_dir = Path(result["project_dir"]).resolve()
+    markdown = Path(result["markdown"]).resolve()
+    assert project_dir == (output / "screen-tutorial").resolve()
+    assert markdown.is_file()
+    assert markdown.parent == project_dir
+    assert result["status"] == "review_required"
+
+    validate = installed_wheel.run([installed_wheel.console, "validate", project_dir])
+    assert validate.returncode == 0, validate.stdout + validate.stderr
+    assert json.loads(validate.stdout)["valid"] is True
 
 
 def test_installed_wheel_dependencies_are_consistent(installed_wheel: InstalledWheel) -> None:
