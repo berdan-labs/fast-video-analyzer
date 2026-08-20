@@ -6,7 +6,10 @@ intent.
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- A small synchronous typed Python facade for planning, running, validating,
+  and inspecting review items without exposing pipeline internals.
 
 ## [0.1.1] - 2026-08-20
 

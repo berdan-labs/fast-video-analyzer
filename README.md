@@ -142,28 +142,36 @@ All three entrypoints invoke the same parser and implementation. Nested
 compatibility aliases such as `review bundle batch-create` and
 `review bundle create-batch` are covered by the CLI compatibility tests.
 
-## Python API (provisional)
+## Python API (stable)
 
-The CLI is the compatibility surface today; there is not yet a stable,
-versioned high-level Python API. The import below is useful for local tooling
-but is provisional and may change in a minor release. See the
-[public contract inventory](docs/public-contracts.md) before building an
-integration around Python imports.
+The synchronous facade below is the supported library seam for one-input
+tooling. It plans, runs, validates, and inspects review items without exposing
+pipeline stages, provider adapters, or persisted JSON dictionaries. Results
+are immutable typed snapshots; `review_required` and `blocked` are returned as
+statuses rather than being mistaken for successful completion. See the
+[Python API reference](docs/python-api.md) and the
+[public contract inventory](docs/public-contracts.md) for compatibility and
+exception rules.
 
 ```python
 from pathlib import Path
-from video_script_reconstructor.pipeline import run_pipeline
+from video_script_reconstructor.api import list_review_items, run, validate
 
-result = run_pipeline(
-    input_value=Path("recording.mp4"),
+result = run(
+    Path("recording.mp4"),
     output_root=Path("outputs"),
     subtitles=[Path("recording.srt")],
     preset="strict",
+    offline=True,
 )
 
 print(f"Report: {result.markdown_path}")
 print(f"Output directory: {result.project_dir}")
 print(f"Status: {result.status}")
+report = validate(result.project_dir)
+if result.status == "review_required":
+    for item in list_review_items(result.project_dir):
+        print(item.review_id, item.required_action)
 ```
 
 ---

@@ -21,6 +21,7 @@ import long_video_analyzer
 from video_script_reconstructor.config import load_config
 
 root = importlib.resources.files("video_script_reconstructor")
+typed_marker = root.joinpath("py.typed").is_file()
 resources = {
     "strict": root.joinpath("resources/configs/strict.yaml").read_text(encoding="utf-8"),
     "schema": root.joinpath("resources/configs/schema.json").read_text(encoding="utf-8"),
@@ -38,6 +39,7 @@ entry_points = [
 print(json.dumps({
     "package_file": video_script_reconstructor.__file__,
     "package_version": video_script_reconstructor.__version__,
+    "typed_marker": typed_marker,
     "preset": load_config("strict").preset,
     "resource_lengths": {key: len(value) for key, value in resources.items()},
     "entry_points": entry_points,
@@ -58,6 +60,7 @@ print(json.dumps({
     assert entry_points["long-video-analyzer"] == "video_script_reconstructor.cli:main"
     assert entry_points["video-script-reconstructor"] == "video_script_reconstructor.cli:main"
     assert result["package_version"] == result["version"]
+    assert result["typed_marker"] is True
     assert (
         Path(result["wrapper_file"]).resolve().is_relative_to(installed_wheel.environment.resolve())
     )
@@ -182,6 +185,44 @@ def test_readme_first_run_matches_an_installed_wheel(installed_wheel: InstalledW
     validate = installed_wheel.run([installed_wheel.console, "validate", project_dir])
     assert validate.returncode == 0, validate.stdout + validate.stderr
     assert json.loads(validate.stdout)["valid"] is True
+
+
+def test_stable_python_api_works_from_an_installed_wheel(
+    installed_wheel: InstalledWheel,
+) -> None:
+    program = """
+import json
+from pathlib import Path
+
+from video_script_reconstructor.api import list_review_items, plan, run, validate
+
+source = Path("api-transcript.txt")
+source.write_text("A stable installed API sentence with token 42.", encoding="utf-8")
+output_root = Path("api-output")
+preview = plan(source, output_root=output_root, vision_mode="none")
+result = run(source, output_root=output_root, vision_mode="none", offline=True)
+report = validate(result.project_dir)
+items = list_review_items(result.project_dir)
+print(json.dumps({
+    "preview_classification": preview.input_classification,
+    "preview_offline": preview.offline,
+    "status": result.status,
+    "exit_code": result.exit_code,
+    "valid": report.valid,
+    "review_items_type": type(items).__name__,
+    "project_dir": str(result.project_dir),
+}))
+"""
+    completed = installed_wheel.run([installed_wheel.python, "-c", program])
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["preview_classification"] == "transcript"
+    assert result["preview_offline"] is True
+    assert result["status"] == "automatically_checked"
+    assert result["exit_code"] == 0
+    assert result["valid"] is True
+    assert result["review_items_type"] == "tuple"
+    assert Path(result["project_dir"]).is_dir()
 
 
 def test_installed_wheel_dependencies_are_consistent(installed_wheel: InstalledWheel) -> None:
