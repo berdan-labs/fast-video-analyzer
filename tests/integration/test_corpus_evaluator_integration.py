@@ -33,4 +33,5 @@ def test_generated_seed_runs_through_manifest_evaluator(tmp_path: Path) -> None:
         "generated-talking-head",
         "generated-slide-lecture",
         "generated-screen-tutorial",
+        "generated-hostile-subtitle",
     }
