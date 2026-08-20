@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .errors import BlockedError, InputError, ReviewRequired, ValidationFailure
 
 
@@ -108,7 +109,7 @@ def _parser() -> argparse.ArgumentParser:
             "with transcript context, OCR, visual evidence, and provenance metadata."
         ),
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     doctor = commands.add_parser(
