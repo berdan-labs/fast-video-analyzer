@@ -26,8 +26,10 @@ The repository operating checklist lives in
   benchmark output.
 - Run the evaluator on every deterministic seed change and use compatible
   model/corpus baselines for release-candidate performance claims.
-- Establish a controlled release-candidate audit for real ASR, OCR,
-  diarization, alignment, and semantic-review capabilities.
+- Run the controlled release-candidate audit for real ASR, OCR, diarization,
+  alignment, and semantic-review capabilities before a minor release.
+- Keep the audit lane map and sanitized report format reproducible while
+  retaining model weights, source media, and raw reports outside Git.
 
 ## Next
 

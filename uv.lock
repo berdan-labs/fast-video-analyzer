@@ -761,6 +761,7 @@ cuda = [
 ]
 dev = [
     { name = "build" },
+    { name = "defusedxml" },
     { name = "mypy" },
     { name = "pip-audit" },
     { name = "pytest" },
@@ -795,6 +796,7 @@ vision-local = [
 [package.metadata]
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
+    { name = "defusedxml", marker = "extra == 'dev'", specifier = ">=0.7.1" },
     { name = "faster-whisper", marker = "extra == 'asr'", specifier = ">=1.1" },
     { name = "huggingface-hub", marker = "extra == 'diarization'", specifier = ">=0.28" },
     { name = "huggingface-hub", marker = "extra == 'models'", specifier = ">=0.28" },

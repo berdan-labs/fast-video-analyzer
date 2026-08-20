@@ -28,6 +28,7 @@ def test_sdist_contains_validator_and_source_contract(installed_wheel: Installed
     required = {
         "scripts/validate_fixture_output.py",
         "scripts/evaluate_corpus.py",
+        "scripts/run_model_audit.py",
         "scripts/validate_corpus_manifest.py",
         "configs/strict.yaml",
         "configs/schema.json",
@@ -35,6 +36,7 @@ def test_sdist_contains_validator_and_source_contract(installed_wheel: Installed
         "tests/acceptance_manifest.json",
         "tests/corpus_baseline.json",
         "tests/corpus_manifest.json",
+        "tests/model_audit_manifest.json",
         "SKILL.md",
     }
     assert required <= names

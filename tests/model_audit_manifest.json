@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "pytest_target": "tests/model_dependent",
+  "lanes": [
+    {
+      "id": "qwen3-asr-1.7b",
+      "description": "Qwen3 speech recognition with checkpointed chunks",
+      "models": ["qwen3-asr-1.7b"],
+      "test_module": "test_qwen3_asr.py"
+    },
+    {
+      "id": "qwen3-forced-aligner-0.6b",
+      "description": "Qwen3 forced-alignment span ordering and exactness",
+      "models": ["qwen3-forced-aligner-0.6b"],
+      "test_module": "test_forced_alignment.py"
+    },
+    {
+      "id": "moss-transcribe-diarize-0.9b",
+      "description": "Anonymous timed speaker turns from the MOSS worker",
+      "models": ["moss-transcribe-diarize-0.9b"],
+      "test_module": "test_neural_diarization.py"
+    },
+    {
+      "id": "pp-ocrv5-server",
+      "description": "PP-OCRv5 high-impact text and bounding boxes",
+      "models": ["pp-ocrv5-server-det", "pp-ocrv5-server-rec"],
+      "test_module": "test_paddle_ocr.py"
+    },
+    {
+      "id": "tesseract",
+      "description": "Tesseract exact high-impact token smoke test",
+      "models": [],
+      "test_module": "test_tesseract_ocr.py"
+    },
+    {
+      "id": "faster-whisper-large-v3",
+      "description": "Large-v3 bounded interval and checkpoint resume",
+      "models": ["faster-whisper-large-v3"],
+      "test_module": "test_faster_whisper_large_v3.py"
+    },
+    {
+      "id": "qwen3-vl-4b-q4",
+      "description": "Configured local semantic vision evidence binding",
+      "models": ["qwen3-vl-4b-q4"],
+      "test_module": "test_semantic_vision.py"
+    }
+  ],
+  "corpus": {
+    "manifest": "tests/corpus_manifest.json",
+    "baseline": "tests/corpus_baseline.json"
+  }
+}
