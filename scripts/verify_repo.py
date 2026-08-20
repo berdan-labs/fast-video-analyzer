@@ -164,6 +164,29 @@ def check_release_contract() -> list[str]:
     ]
 
 
+def check_pypi_setup_documentation() -> list[str]:
+    """Keep the PyPI setup guide aligned with the release contract and security gate."""
+
+    path = ROOT / "docs" / "pypi-trusted-publishing.md"
+    try:
+        document = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"unable to read PyPI setup documentation: {exc}"]
+    required_fragments = (
+        "fast-video-analyzer",
+        "berdan-labs",
+        "release.yml",
+        "`pypi`",
+        "two-factor authentication",
+        "Do not create or store a `PYPI_TOKEN` secret.",
+    )
+    return [
+        f"PyPI setup documentation is missing required fragment: {fragment!r}"
+        for fragment in required_fragments
+        if fragment not in document
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quiet", action="store_true", help="only print failures")
@@ -175,6 +198,7 @@ def main() -> int:
     failures.extend(check_manifest())
     failures.extend(check_workflow_actions())
     failures.extend(check_release_contract())
+    failures.extend(check_pypi_setup_documentation())
 
     if failures:
         for failure in failures:
