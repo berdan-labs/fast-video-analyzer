@@ -12,7 +12,10 @@ version in `pyproject.toml`.
 4. Run `uv run ruff check src tests scripts`.
 5. Run `uv run mypy src/video_script_reconstructor`.
 6. Run the mandatory unit, integration, e2e, mutation, and packaging suites.
-7. Review compatibility, schema, privacy, and security impact.
+7. On controlled owner hardware, run the release-candidate model audit in
+   [`docs/model-audit.md`](model-audit.md) and retain its sanitized JSON and
+   Markdown artifacts.
+8. Review compatibility, schema, privacy, and security impact.
 
 ## Workflow
 
@@ -31,6 +34,12 @@ environment and requires a PyPI Trusted Publisher to be configured by a human.
 The workflow does not use a long-lived PyPI token. Follow the exact owner,
 repository, workflow, environment, and first-publish procedure in
 [pypi-trusted-publishing.md](pypi-trusted-publishing.md).
+
+Before creating a minor-release GitHub Release, attach the exact model-audit
+JSON and Markdown files from the tagged commit and link the Markdown file from
+the release notes. The audit artifacts are release evidence, not source files;
+do not commit raw model output, generated projects, or host-specific timing
+logs.
 
 ## Rollback
 

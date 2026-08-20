@@ -43,6 +43,7 @@ REQUIRED_FILES = (
     "docs/backup-and-restore.md",
     "docs/cli-reference.md",
     "docs/corpus-evaluation.md",
+    "docs/model-audit.md",
     "docs/public-contracts.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
@@ -51,9 +52,11 @@ REQUIRED_FILES = (
     "docs/runbooks.md",
     "scripts/backup_repo.py",
     "scripts/evaluate_corpus.py",
+    "scripts/run_model_audit.py",
     "scripts/validate_corpus_manifest.py",
     "tests/corpus_baseline.json",
     "tests/corpus_manifest.json",
+    "tests/model_audit_manifest.json",
     ".python-version",
 )
 
@@ -130,6 +133,54 @@ def check_corpus_baseline() -> list[str]:
         unknown = set(cases) - manifest_ids
         if unknown:
             errors.append(f"corpus baseline references unknown cases: {sorted(unknown)!r}")
+    return errors
+
+
+def check_model_audit_manifest() -> list[str]:
+    """Keep release-audit lanes aligned with the model-dependent contract."""
+
+    errors: list[str] = []
+    try:
+        acceptance = json.loads(
+            (ROOT / "tests" / "acceptance_manifest.json").read_text(encoding="utf-8")
+        )
+        audit = json.loads(
+            (ROOT / "tests" / "model_audit_manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"unable to read model audit manifest: {exc}"]
+    if not isinstance(acceptance, dict) or not isinstance(audit, dict):
+        return ["acceptance and model audit manifests must contain objects"]
+    if audit.get("schema_version") != "1.0":
+        errors.append("model audit manifest schema_version must be '1.0'")
+    expected = {
+        str(item) for item in acceptance.get("model_dependent", []) if isinstance(item, str)
+    }
+    lanes = audit.get("lanes", [])
+    actual = {str(item.get("id")) for item in lanes if isinstance(item, dict) and item.get("id")}
+    if actual != expected:
+        errors.append(
+            f"model audit lanes {sorted(actual)!r} do not match acceptance models {sorted(expected)!r}"
+        )
+    for item in lanes if isinstance(lanes, list) else []:
+        if not isinstance(item, dict):
+            continue
+        module = item.get("test_module")
+        if not isinstance(module, str) or Path(module).name != module or ".." in Path(module).parts:
+            errors.append(f"model audit test_module is not a safe module name: {module!r}")
+            continue
+        if not (ROOT / "tests" / "model_dependent" / module).is_file():
+            errors.append(f"model audit test module is missing: {module}")
+    corpus = audit.get("corpus", {})
+    if not isinstance(corpus, dict):
+        errors.append("model audit corpus must be an object")
+    else:
+        for key in ("manifest", "baseline"):
+            value = corpus.get(key)
+            if not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts:
+                errors.append(f"model audit corpus {key} must be a safe repository path")
+            elif not (ROOT / value).is_file():
+                errors.append(f"model audit corpus file is missing: {value}")
     return errors
 
 
@@ -242,6 +293,7 @@ def main() -> int:
     failures.extend(f"missing required file: {path}" for path in missing)
     failures.extend(check_manifest())
     failures.extend(check_corpus_baseline())
+    failures.extend(check_model_audit_manifest())
     failures.extend(check_workflow_actions())
     failures.extend(check_release_contract())
     failures.extend(check_pypi_setup_documentation())

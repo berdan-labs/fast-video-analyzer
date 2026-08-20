@@ -29,6 +29,7 @@ vision-local = ["huggingface-hub>=0.28"]
 diarization = ["huggingface-hub>=0.28"]
 dev = [
   "build>=1.2",
+  "defusedxml>=0.7.1",
   "mypy>=1.11",
   "pip-audit>=2.9",
   "pytest>=8.3",

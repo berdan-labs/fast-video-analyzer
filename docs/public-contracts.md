@@ -135,6 +135,10 @@ provisional imports instead of presenting them as stable library APIs.
 - `tests/corpus_baseline.json` is the scoring baseline for the checked-in seed;
   host-dependent timings are intentionally absent until a compatible machine
   baseline is recorded.
+- `tests/model_audit_manifest.json` maps every model-dependent acceptance lane
+  to its test module and model identity. The owner-controlled audit script
+  produces release evidence from it; its raw output is not a repository
+  contract.
 - `.state/canonical-project.json` is the authoritative project record.
   Markdown is rendered from it and must not be treated as the canonical store.
 - `.state/run-manifest.json`, `.state/audit.json`, review queues, checkpoints,
