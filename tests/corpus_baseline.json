@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "scoring_version": "1.0",
+  "corpus_hash": "8b1a965bfd421e768481e0df79a95978d268128ad407c90ae23c2eb46416499b",
+  "model_revision": "deterministic-fixtures",
+  "performance": {
+    "max_regression_fraction": 0.15,
+    "baseline_elapsed_seconds": {
+      "generated-talking-head": null,
+      "generated-slide-lecture": null,
+      "generated-screen-tutorial": null
+    }
+  },
+  "cases": {
+    "generated-talking-head": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 0,
+        "minimum_visual_events": 0
+      }
+    },
+    "generated-slide-lecture": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 1,
+        "minimum_visual_events": 1
+      }
+    },
+    "generated-screen-tutorial": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 1,
+        "minimum_visual_events": 1
+      }
+    }
+  }
+}

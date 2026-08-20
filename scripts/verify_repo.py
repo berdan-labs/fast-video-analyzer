@@ -7,6 +7,7 @@ dependencies, contact GitHub, inspect secrets, or change the working tree.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -49,7 +50,9 @@ REQUIRED_FILES = (
     "docs/releasing.md",
     "docs/runbooks.md",
     "scripts/backup_repo.py",
+    "scripts/evaluate_corpus.py",
     "scripts/validate_corpus_manifest.py",
+    "tests/corpus_baseline.json",
     "tests/corpus_manifest.json",
     ".python-version",
 )
@@ -88,6 +91,45 @@ def check_manifest() -> list[str]:
         errors.append(f"mandatory suites {sorted(mandatory)!r} do not match {sorted(expected)!r}")
     if manifest.get("output_contract", {}).get("markdown_files") != 1:
         errors.append("output contract must require exactly one Markdown file")
+    return errors
+
+
+def check_corpus_baseline() -> list[str]:
+    """Keep the checked-in quality baseline bound to the current corpus."""
+
+    errors: list[str] = []
+    manifest_path = ROOT / "tests" / "corpus_manifest.json"
+    baseline_path = ROOT / "tests" / "corpus_baseline.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"unable to read corpus baseline or manifest: {exc}"]
+    if not isinstance(manifest, dict) or not isinstance(baseline, dict):
+        return ["corpus baseline and manifest roots must be objects"]
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    expected_hash = hashlib.sha256(canonical).hexdigest()
+    if baseline.get("corpus_hash") != expected_hash:
+        errors.append("corpus baseline hash does not match tests/corpus_manifest.json")
+    if baseline.get("scoring_version") != "1.0":
+        errors.append("corpus baseline scoring_version must be '1.0'")
+    cases = baseline.get("cases")
+    if not isinstance(cases, dict) or not cases:
+        errors.append("corpus baseline cases must be a non-empty object")
+    else:
+        manifest_ids = {
+            str(case.get("id"))
+            for case in manifest.get("cases", [])
+            if isinstance(case, dict) and case.get("id")
+        }
+        unknown = set(cases) - manifest_ids
+        if unknown:
+            errors.append(f"corpus baseline references unknown cases: {sorted(unknown)!r}")
     return errors
 
 
@@ -199,6 +241,7 @@ def main() -> int:
     missing = check_required_files()
     failures.extend(f"missing required file: {path}" for path in missing)
     failures.extend(check_manifest())
+    failures.extend(check_corpus_baseline())
     failures.extend(check_workflow_actions())
     failures.extend(check_release_contract())
     failures.extend(check_pypi_setup_documentation())

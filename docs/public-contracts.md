@@ -132,6 +132,9 @@ provisional imports instead of presenting them as stable library APIs.
   user project format.
 - `tests/corpus_manifest.json` is the public evaluation-corpus and provenance
   contract; it contains source hashes and coverage gaps, not run output.
+- `tests/corpus_baseline.json` is the scoring baseline for the checked-in seed;
+  host-dependent timings are intentionally absent until a compatible machine
+  baseline is recorded.
 - `.state/canonical-project.json` is the authoritative project record.
   Markdown is rendered from it and must not be treated as the canonical store.
 - `.state/run-manifest.json`, `.state/audit.json`, review queues, checkpoints,

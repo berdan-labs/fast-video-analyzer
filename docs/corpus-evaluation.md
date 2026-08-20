@@ -11,6 +11,19 @@ Validate the manifest and every tracked source hash from the repository root:
 uv run python scripts/validate_corpus_manifest.py tests/corpus_manifest.json
 ```
 
+Run the generated seed and emit a local JSON/Markdown evaluation report:
+
+```bash
+uv run python scripts/evaluate_corpus.py --manifest tests/corpus_manifest.json --baseline tests/corpus_baseline.json --output-root path/to/local-corpus-output --report-json path/to/local-corpus-output/report.json --report-markdown path/to/local-corpus-output/report.md
+```
+
+The checked-in baseline contains quality targets and a 15% performance
+regression policy. It deliberately has no elapsed-time numbers: timing is
+host-dependent, so a release or performance audit must supply a baseline made
+with the same model revision and request `--require-performance-baseline`.
+The evaluator refuses a comparison when the scoring version, corpus hash, or
+model revision differs.
+
 ## What belongs in the repository
 
 The repository may contain small generated fixtures when they are reproducible,
@@ -46,9 +59,9 @@ The manifest marks Filipino/code-switching, overlapping speakers, audio-only
 and transcript-only inputs, subtitle/caption variants, hostile text, media
 pathologies, long durations, and visual-only inputs as `gap`. Those entries are
 deliberate collection work, not claims that the current seed already measures
-them. DEV-102 will consume this manifest to produce scored quality and
-performance reports once the missing cases have licensed or owner-controlled
-sources.
+them. The evaluator will produce scored quality and performance reports for
+new cases once they have licensed or owner-controlled sources; the seed
+evaluator already runs these three cases in ordinary CI.
 
 When a fixture changes, regenerate it intentionally, update its hash and
 expected assertions, and run the validator in the same pull request. Do not

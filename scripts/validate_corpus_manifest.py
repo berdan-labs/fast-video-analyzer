@@ -215,6 +215,17 @@ def validate_manifest(
         if expected is not None:
             _string_list(expected.get("spoken"), f"{label}.expected.spoken", errors)
             _string_list(expected.get("tokens"), f"{label}.expected.tokens", errors)
+            minimum_visual_events = expected.get("minimum_visual_events")
+            if not isinstance(minimum_visual_events, int) or isinstance(
+                minimum_visual_events, bool
+            ):
+                errors.append(
+                    f"{label}.expected.minimum_visual_events must be a non-negative integer"
+                )
+            elif minimum_visual_events < 0:
+                errors.append(
+                    f"{label}.expected.minimum_visual_events must be a non-negative integer"
+                )
 
     coverage = manifest.get("coverage_requirements")
     if not isinstance(coverage, list) or not coverage:

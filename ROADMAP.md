@@ -24,6 +24,8 @@ The repository operating checklist lives in
 - Expand the manifest-driven evaluation corpus from the generated seed into
   licensed or owner-controlled cases without committing private media or raw
   benchmark output.
+- Run the evaluator on every deterministic seed change and use compatible
+  model/corpus baselines for release-candidate performance claims.
 - Establish a controlled release-candidate audit for real ASR, OCR,
   diarization, alignment, and semantic-review capabilities.
 
