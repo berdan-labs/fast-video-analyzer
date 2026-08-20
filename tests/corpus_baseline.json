@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "scoring_version": "1.0",
-  "corpus_hash": "be8f567f52bca50fb0674b35f0f6e629b3c92c52f2820a6b37755ed1d2d75aa7",
+  "corpus_hash": "75bee050bf8ebfe48754f63ed2cea288da7acdb8fc13fb754bffa44872e51719",
   "model_revision": "deterministic-fixtures",
   "performance": {
     "max_regression_fraction": 0.15,
@@ -9,7 +9,8 @@
       "generated-talking-head": null,
       "generated-slide-lecture": null,
       "generated-screen-tutorial": null,
-      "generated-hostile-subtitle": null
+      "generated-hostile-subtitle": null,
+      "generated-caption-variants": null
     }
   },
   "cases": {
@@ -35,6 +36,13 @@
       }
     },
     "generated-hostile-subtitle": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 2,
+        "minimum_visual_events": 0
+      }
+    },
+    "generated-caption-variants": {
       "quality": {
         "expected_spoken_count": 2,
         "expected_token_count": 2,

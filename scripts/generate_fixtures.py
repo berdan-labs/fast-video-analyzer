@@ -52,6 +52,36 @@ def _write_srt(path: Path, first: str, second: str) -> None:
     )
 
 
+def _write_vtt(path: Path, first: str, second: str) -> None:
+    path.write_text(
+        "WEBVTT\n\n"
+        f"1\n00:00:00.000 --> 00:00:02.000\n{first}\n\n"
+        f"2\n00:00:02.000 --> 00:00:04.000\n{second}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_ass(path: Path, first: str, second: str) -> None:
+    path.write_text(
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        "0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        f"Dialogue: 0,0:00:00.00,0:00:02.00,Default,Speaker,0,0,0,,{first}\n"
+        f"Dialogue: 0,0:00:02.00,0:00:04.00,Default,Speaker,0,0,0,,{second}\n",
+        encoding="utf-8",
+    )
+
+
 def _encode(ffmpeg: str, frames: list[Path], audio: Path, output: Path) -> None:
     concat = output.with_suffix(".concat.txt")
     entries: list[str] = []
@@ -127,6 +157,13 @@ def generate(root: Path) -> list[Path]:
             "# deploy --strict <script>alert(1)</script>",
             r'C:\Users\demo\notes.md && echo "$HOME"',
         ),
+        (
+            "caption-variants",
+            "Captions",
+            "Format coverage.",
+            "WebVTT and ASS preserve this.",
+            "Every caption candidate remains auditable.",
+        ),
     ]
     for name, title, detail, first, second in fixtures:
         frame_a = root / f"{name}-before.png"
@@ -135,7 +172,11 @@ def generate(root: Path) -> list[Path]:
         _frame(frame_b, title, detail, active=True)
         output = root / f"{name}.mp4"
         _encode(ffmpeg, [frame_a, frame_b], audio, output)
-        _write_srt(root / f"{name}.srt", first, second)
+        if name == "caption-variants":
+            _write_vtt(root / f"{name}.vtt", first, second)
+            _write_ass(root / f"{name}.ass", first, second)
+        else:
+            _write_srt(root / f"{name}.srt", first, second)
         outputs.append(output)
     audio.unlink()
     return outputs

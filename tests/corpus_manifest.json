@@ -47,8 +47,8 @@
     },
     {
       "id": "subtitle-and-caption-variants",
-      "status": "gap",
-      "case_ids": []
+      "status": "covered",
+      "case_ids": ["generated-caption-variants"]
     },
     {
       "id": "format-and-media-pathologies",
@@ -209,6 +209,45 @@
           "C:\\Users\\demo\\notes.md && echo \"$HOME\""
         ],
         "tokens": ["--strict", "C:\\Users\\demo\\notes.md"],
+        "minimum_visual_events": 0
+      }
+    },
+    {
+      "id": "generated-caption-variants",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "subtitle-and-caption-variants",
+        "webvtt",
+        "ass",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/caption-variants.mp4",
+        "sha256": "f808da93f28545261bdf6ee8333aa70912af136bf3fda74eb1d2ff8054c5161d"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/caption-variants.vtt",
+          "sha256": "aa7dead0fb8289510e056ec6bafa702cd25aaab9fb0db6d654801a96f417225e"
+        },
+        {
+          "path": "tests/fixtures/generated/caption-variants.ass",
+          "sha256": "94a0a38b88bd3410f9105410355cf7ed3d5e27c6230497e0d92d69012e086f1c"
+        }
+      ],
+      "expected": {
+        "spoken": [
+          "WebVTT and ASS preserve this.",
+          "Every caption candidate remains auditable."
+        ],
+        "tokens": ["WebVTT", "ASS"],
         "minimum_visual_events": 0
       }
     }
