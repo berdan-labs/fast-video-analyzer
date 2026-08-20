@@ -210,7 +210,8 @@ uv run pytest tests/e2e tests/mutation tests/packaging -q
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [OPERATIONS.md](OPERATIONS.md),
 [docs/releasing.md](docs/releasing.md), [docs/runbooks.md](docs/runbooks.md),
-and [SUPPORT.md](SUPPORT.md) for maintainer and contributor workflows.
+[docs/corpus-evaluation.md](docs/corpus-evaluation.md), and
+[SUPPORT.md](SUPPORT.md) for maintainer and contributor workflows.
 
 ---
 

@@ -19,11 +19,11 @@ The repository operating checklist lives in
 
 ## Now
 
-- Make PyPI installation and the first successful user journey authoritative
-  and continuously tested.
-- Use one source of truth for package, CLI, and release versions.
-- Define stable, provisional, and internal CLI/API/schema contracts.
-- Build a manifest-driven evaluation corpus and quality/performance baseline.
+- Keep the PyPI-first user journey, one version authority, and public
+  CLI/API/schema contracts green as the product changes.
+- Expand the manifest-driven evaluation corpus from the generated seed into
+  licensed or owner-controlled cases without committing private media or raw
+  benchmark output.
 - Establish a controlled release-candidate audit for real ASR, OCR,
   diarization, alignment, and semantic-review capabilities.
 
