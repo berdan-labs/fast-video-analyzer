@@ -53,6 +53,10 @@ Last reviewed: 2026-08-20
 - [x] Publish the first tagged release through the pending publisher, then
   verify the active PyPI publisher, package page, clean installation, and
   release URL (`v0.1.0`, GitHub Actions run `32341261708`).
+- [x] Publish `v0.2.0` through the active Trusted Publisher, attach the exact
+  sanitized model-audit evidence and SBOM to GitHub Releases, verify release
+  attestations, and complete a clean PyPI install/dogfood journey (workflow
+  `32371441983`).
 - [x] Create the first off-GitHub mirror in the verified EFS-encrypted
   `E:\Encrypted-Backups\fast-video-analyzer` destination and record a
   successful restore drill for main commit `3d3bc4c`.

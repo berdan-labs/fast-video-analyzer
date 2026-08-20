@@ -30,11 +30,19 @@ Use these exact values:
 
 As of 2026-08-20, the pending publisher was registered with the exact values
 above and the first OIDC publication completed successfully. The publisher is
-now active for `fast-video-analyzer`; the package API reports version `0.1.0`,
-and a clean virtual environment installed that exact version from PyPI and
-passed `fast-video-analyzer --help` plus `doctor --offline`.
+now active for `fast-video-analyzer`; the latest package API reports version
+`0.2.0`, and a fresh Python 3.12 environment installed that exact version from
+PyPI and passed the stable API import, both console aliases, and
+`doctor --offline --summary`.
 
-Evidence for the first publication:
+The current release evidence is:
+
+- GitHub Actions run: `32371441983`
+- GitHub Release: <https://github.com/berdan-labs/fast-video-analyzer/releases/tag/v0.2.0>
+- PyPI release: <https://pypi.org/project/fast-video-analyzer/0.2.0/>
+- PyPI JSON API: <https://pypi.org/pypi/fast-video-analyzer/0.2.0/json>
+
+Historical activation evidence for the first publication:
 
 - GitHub Actions run: `32341261708`
 - GitHub Release: <https://github.com/berdan-labs/fast-video-analyzer/releases/tag/v0.1.0>
