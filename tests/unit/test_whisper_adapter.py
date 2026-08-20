@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -767,3 +768,57 @@ def test_checkpointed_chunks_reports_progress_without_affecting_resume(tmp_path:
     progress = result.metadata["progress"]
     assert progress["total_chunks"] == 2
     assert len(progress["chunk_timings"]) == 2
+
+
+def test_checkpointed_chunks_emits_heartbeat_during_native_call(tmp_path: Path) -> None:
+    media = tmp_path / "media.bin"
+    media.write_bytes(b"heartbeat-media-content")
+    events: list[dict[str, object]] = []
+
+    def recognize(path: Path, **kwargs: object):
+        time.sleep(0.08)
+        start = int(kwargs["interval_start_ms"])
+        end = int(kwargs["interval_end_ms"])
+        return [
+            {
+                "segment_id": f"segment-{start}",
+                "start_ms": start,
+                "end_ms": end,
+                "raw_text": f"chunk {start}",
+                "normalized_text": f"chunk {start}",
+                "words": [],
+            }
+        ]
+
+    transcribe_checkpointed_chunks(
+        ModelIndependentASRAdapter(recognize, name="heartbeat-fixture"),
+        media,
+        duration_ms=1000,
+        checkpoint_dir=tmp_path / "checkpoints",
+        chunk_ms=1000,
+        overlap_ms=0,
+        progress_callback=lambda payload: events.append(dict(payload)),
+        progress_heartbeat_seconds=0.01,
+    )
+
+    heartbeats = [event for event in events if event["event"] == "chunk_heartbeat"]
+    assert heartbeats
+    assert all(event["chunk_index"] == 0 for event in heartbeats)
+    assert all(float(event["elapsed_seconds"]) >= 0 for event in heartbeats)
+    assert events[0]["event"] == "chunk_started"
+    assert events[-1]["event"] == "completed"
+
+
+def test_checkpointed_chunks_rejects_invalid_heartbeat_interval(tmp_path: Path) -> None:
+    media = tmp_path / "media.bin"
+    media.write_bytes(b"heartbeat-validation")
+    adapter = ModelIndependentASRAdapter(lambda *_args, **_kwargs: [], name="fixture")
+
+    with pytest.raises(ASRError, match="heartbeat interval"):
+        transcribe_checkpointed_chunks(
+            adapter,
+            media,
+            duration_ms=1000,
+            checkpoint_dir=tmp_path / "checkpoints",
+            progress_heartbeat_seconds=-1,
+        )
