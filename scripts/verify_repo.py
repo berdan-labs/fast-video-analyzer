@@ -41,6 +41,7 @@ REQUIRED_FILES = (
     "docs/action-allowlist.md",
     "docs/backup-and-restore.md",
     "docs/cli-reference.md",
+    "docs/corpus-evaluation.md",
     "docs/public-contracts.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
@@ -48,6 +49,8 @@ REQUIRED_FILES = (
     "docs/releasing.md",
     "docs/runbooks.md",
     "scripts/backup_repo.py",
+    "scripts/validate_corpus_manifest.py",
+    "tests/corpus_manifest.json",
     ".python-version",
 )
 

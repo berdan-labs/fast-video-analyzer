@@ -130,6 +130,8 @@ provisional imports instead of presenting them as stable library APIs.
   configurations. Unknown configuration fields are rejected.
 - `tests/acceptance_manifest.json` is the CI acceptance-suite contract, not a
   user project format.
+- `tests/corpus_manifest.json` is the public evaluation-corpus and provenance
+  contract; it contains source hashes and coverage gaps, not run output.
 - `.state/canonical-project.json` is the authoritative project record.
   Markdown is rendered from it and must not be treated as the canonical store.
 - `.state/run-manifest.json`, `.state/audit.json`, review queues, checkpoints,

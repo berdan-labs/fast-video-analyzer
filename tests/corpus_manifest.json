@@ -1,0 +1,174 @@
+{
+  "schema_version": "1.0",
+  "manifest_id": "fast-video-analyzer-seed-corpus",
+  "description": "Small generated seed used for deterministic contract checks and benchmark wiring.",
+  "hash_algorithm": "sha256",
+  "source_policy": {
+    "allowed_kinds": ["generated", "licensed", "owner_controlled"],
+    "external_media_may_remain_outside_git": true,
+    "private_media_belongs_in_owner_local_manifests": true,
+    "raw_benchmark_outputs_belong_outside_git": true
+  },
+  "coverage_requirements": [
+    {
+      "id": "clean-english-speech",
+      "status": "covered",
+      "case_ids": ["generated-talking-head"]
+    },
+    {
+      "id": "filipino-code-switching",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "speaker-overlap-and-change",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "slide-lecture-text",
+      "status": "covered",
+      "case_ids": ["generated-slide-lecture"]
+    },
+    {
+      "id": "screen-tutorial-ui-state",
+      "status": "covered",
+      "case_ids": ["generated-screen-tutorial"]
+    },
+    {
+      "id": "talking-head-sparse-visual",
+      "status": "covered",
+      "case_ids": ["generated-talking-head"]
+    },
+    {
+      "id": "audio-only-and-transcript-only",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "subtitle-and-caption-variants",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "format-and-media-pathologies",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "hostile-subtitle-and-ocr-text",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "duration-classes",
+      "status": "gap",
+      "case_ids": []
+    },
+    {
+      "id": "visual-only-input",
+      "status": "gap",
+      "case_ids": []
+    }
+  ],
+  "cases": [
+    {
+      "id": "generated-talking-head",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "clean-english-speech",
+        "talking-head",
+        "sparse-visual",
+        "subtitle-led",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/talking-head.mp4",
+        "sha256": "7536a4ff87671985eb0ad67baf9d61a4d3ce34809775ca33f9e3c33158526b66"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/talking-head.srt",
+          "sha256": "ff5ea1417964522a7b8ab4a40374b99014d2aaaeed5892955e7c6fbb1127faf0"
+        }
+      ],
+      "expected": {
+        "spoken": ["This is a complete fixture.", "Nothing is summarized."],
+        "tokens": []
+      }
+    },
+    {
+      "id": "generated-slide-lecture",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "clean-english-speech",
+        "slide-lecture",
+        "small-text",
+        "visual-change",
+        "subtitle-led",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/slide-lecture.mp4",
+        "sha256": "f7203247214f5bc3f3431dcf2be23a9fac2967991f59ecbe2d7436e581884bc9"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/slide-lecture.srt",
+          "sha256": "db3bd832c27663abc2f0b01197c4271e9aaae758f8a847648bc4dc2ae8d20cf0"
+        }
+      ],
+      "expected": {
+        "spoken": ["The exact value is 42.", "Now the slide changes."],
+        "tokens": ["42"]
+      }
+    },
+    {
+      "id": "generated-screen-tutorial",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "clean-english-speech",
+        "screen-tutorial",
+        "command-text",
+        "visual-change",
+        "subtitle-led",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/screen-tutorial.mp4",
+        "sha256": "aa11d25eec7c4d395b4e955c1830d892a2b31b652879f93603c34f1a6439d6a0"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/screen-tutorial.srt",
+          "sha256": "1e7238726dfe9bea4f1722fec1864d3c6982385b5fab44f14971535b81da6fdb"
+        }
+      ],
+      "expected": {
+        "spoken": ["Run tool --strict now.", "The setting is now enabled."],
+        "tokens": ["tool --strict"]
+      }
+    }
+  ]
+}
