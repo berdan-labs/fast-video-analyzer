@@ -8146,6 +8146,23 @@ def run_pipeline(
         except Exception as exc:
             blockers.append(f"Visual evidence stage blocked: {exc}")
             manifest.finish("visual_evidence", "blocked", str(exc))
+        except BaseException as exc:
+            # A process-level interruption during FFmpeg or a visual worker
+            # must leave the durable stage boundary explicit before the
+            # interruption is re-raised.  The partial frame/checkpoint state
+            # remains available for the next explicit resume, while a running
+            # visual stage can never be mistaken for a completed project.
+            detail = f"Interrupted during visual evidence stage: {type(exc).__name__}"
+            if str(exc):
+                detail += f": {exc}"
+            manifest.finish("visual_evidence", "failed", detail)
+            try:
+                manifest.write(run_manifest_path)
+            except Exception:  # pragma: no cover - defensive persistence boundary
+                LOGGER.warning(
+                    "Unable to persist interrupted visual stage", exc_info=True
+                )
+            raise
     elif kind != "video":
         for block in blocks:
             block["visual_description"] = "[no visual source available]"

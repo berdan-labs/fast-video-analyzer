@@ -361,6 +361,58 @@ def test_interrupted_transcript_stage_is_durable_and_resumable(tmp_path: Path) -
     )
 
 
+def test_interrupted_visual_stage_is_durable_and_resumable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = _generate(tmp_path / "fixtures")
+    import video_script_reconstructor.pipeline as pipeline_module
+
+    original_extract_visual_evidence = pipeline_module._extract_visual_evidence
+    interrupted = True
+
+    def extract_visual_evidence(*args: object, **kwargs: object):
+        if interrupted:
+            raise KeyboardInterrupt("simulated visual stop")
+        return original_extract_visual_evidence(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pipeline_module, "_extract_visual_evidence", extract_visual_evidence
+    )
+    output_root = tmp_path / "out"
+    subtitles = [fixtures / "talking-head.srt"]
+    with pytest.raises(KeyboardInterrupt, match="simulated visual stop"):
+        run_pipeline(
+            fixtures / "talking-head.mp4",
+            output_root=output_root,
+            subtitles=subtitles,
+            vision_mode="none",
+        )
+
+    project_dir = output_root / "talking-head"
+    interrupted_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert interrupted_manifest["stages"]["transcript"]["status"] == "completed"
+    assert interrupted_manifest["stages"]["visual_evidence"]["status"] == "failed"
+    assert "KeyboardInterrupt" in interrupted_manifest["stages"]["visual_evidence"]["detail"]
+    assert not (project_dir / ".state" / "canonical-project.json").exists()
+
+    interrupted = False
+    resumed = run_pipeline(
+        fixtures / "talking-head.mp4",
+        output_root=output_root,
+        subtitles=subtitles,
+        vision_mode="none",
+        resume=True,
+    )
+    assert resumed.validation is not None and resumed.validation.valid
+    resumed_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert resumed_manifest["stages"]["visual_evidence"]["status"] == "completed"
+    assert _canonical(resumed)["frames"]
+
+
 def test_partial_finalization_marker_forces_rebuild_before_cache_hit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
