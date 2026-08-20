@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fast-video-analyzer"
-version = "0.1.1"
+version = "0.2.0"
 description = "Analyze videos into structured Markdown notes for LLMs and AI agents using Speech Recognition (Whisper ASR), Computer Vision (OCR), and scene detection."
 readme = "README.md"
 requires-python = ">=3.10"
