@@ -1,31 +1,55 @@
 # Roadmap
 
-This roadmap records direction, not a promise of delivery dates.
+This roadmap summarizes product direction, not delivery dates. The executable
+engineering sequence and acceptance gates live in
+[docs/development-plan.md](docs/development-plan.md). The repository operating
+checklist lives in [docs/maintenance-backlog.md](docs/maintenance-backlog.md).
 
-The executable owner checklist lives in
-[docs/maintenance-backlog.md](docs/maintenance-backlog.md).
+## Current baseline
+
+- `v0.1.0` is published on GitHub and PyPI through Trusted Publishing.
+- The public pipeline produces one chronological evidence-linked Markdown
+  project and retains strict validation, provenance, and review gates.
+- Protected `main`, mandatory acceptance suites, CodeQL, cross-platform smoke
+  tests, release provenance, and encrypted restore-tested backups are active.
+- The repository intentionally uses one administrator and zero required
+  approvals; no second administrator is planned.
 
 ## Now
 
-- Make locked CI, release, security, and maintainer runbooks reliable.
-- Protect `main` after the required aggregate CI check has proved stable.
-- Establish a second recovery-capable human maintainer.
+- Make PyPI installation and the first successful user journey authoritative
+  and continuously tested.
+- Use one source of truth for package, CLI, and release versions.
+- Define stable, provisional, and internal CLI/API/schema contracts.
+- Build a manifest-driven evaluation corpus and quality/performance baseline.
+- Establish a controlled release-candidate audit for real ASR, OCR,
+  diarization, alignment, and semantic-review capabilities.
 
-## Planned
+## Next
 
-- Add Windows and macOS smoke coverage on a scheduled cadence.
-- Publish a first release through a verified Trusted Publishing environment.
-- Add a documented backup export and quarterly restore drill.
-- Expand examples and contract tests for public CLI aliases and schema changes.
+- Improve transcript, OCR, visual-event, and semantic-review quality based on
+  measured corpus failures.
+- Enforce performance, memory, storage, and resume-regression budgets.
+- Extract bounded pipeline stages behind characterization tests instead of
+  performing a broad rewrite.
+- Improve capability setup and human review throughput while preserving the
+  local-first evidence contract.
+- Publish a small stable Python API before adding new integrations.
 
-## Exploring
+## Later
 
-- GitHub Discussions for user questions and announcements.
-- A lightweight project board and quarterly release milestones.
-- Signed release artifacts and a generated SBOM attached to each release.
+- Add thin agent/MCP integrations over stable public contracts when a real user
+  journey justifies them.
+- Consider a local review UI only if measured reviewer effort shows that the
+  CLI and file-bundle workflow is the limiting factor.
+- Stabilize schemas, migrations, platform/input support, and compatibility for
+  a `1.0.0` release.
 
 ## Not now
 
-- A broad pipeline rewrite without a contract-preserving migration plan.
-- Automatic merging or publishing without a human approval boundary.
+- A broad pipeline rewrite.
+- A hosted service or telemetry-by-default execution path.
+- A second administrator or impossible review quorum.
+- Automatic `fully_verified` status or automatic destructive cleanup.
 - Mandatory model downloads on ordinary pull requests.
+- New aliases, integrations, or UI surfaces without a measured user need.

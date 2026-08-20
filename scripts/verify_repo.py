@@ -41,6 +41,7 @@ REQUIRED_FILES = (
     "docs/action-allowlist.md",
     "docs/backup-and-restore.md",
     "docs/cli-reference.md",
+    "docs/development-plan.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
     "docs/owner-operations-prompt.md",
