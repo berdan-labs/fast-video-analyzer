@@ -184,6 +184,13 @@ fast-video-analyzer validate "path/to/video (Analyzer Outputs)"
 fast-video-analyzer review list "path/to/video (Analyzer Outputs)"
 ```
 
+If the run returns `review_required` (exit code `3`), continue with the
+copyable no-copy bundle handoff in
+[docs/review-workflow.md](docs/review-workflow.md). It explains how to inspect
+review IDs, create bounded host-agent requests, apply attributable responses,
+and perform the final human sign-off without copying source media into the
+handoff.
+
 ---
 
 ## Privacy and security
