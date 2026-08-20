@@ -1,9 +1,11 @@
 # Roadmap
 
-This roadmap summarizes product direction, not delivery dates. The executable
-engineering sequence and acceptance gates live in
-[docs/development-plan.md](docs/development-plan.md). The repository operating
-checklist lives in [docs/maintenance-backlog.md](docs/maintenance-backlog.md).
+This roadmap summarizes durable product direction, not delivery dates or a
+private owner work log. Detailed sequencing, experiments, raw benchmark
+results, and owner-only decisions stay outside the Git working tree. Public
+work that needs contributor context belongs in a focused issue or pull request.
+The repository operating checklist lives in
+[docs/maintenance-backlog.md](docs/maintenance-backlog.md).
 
 ## Current baseline
 
@@ -53,3 +55,5 @@ checklist lives in [docs/maintenance-backlog.md](docs/maintenance-backlog.md).
 - Automatic `fully_verified` status or automatic destructive cleanup.
 - Mandatory model downloads on ordinary pull requests.
 - New aliases, integrations, or UI surfaces without a measured user need.
+- Private planning notes, AI transcripts, raw benchmark output, or machine-
+  specific working files committed as if they were product documentation.
