@@ -28,11 +28,22 @@ Use these exact values:
 
 ## Current status
 
-As of 2026-08-20, PyPI shows a pending publisher registered with the exact
-values above. The package does not exist on PyPI yet, so the publisher will
-become an ordinary active publisher only after the first successful release
-creates `fast-video-analyzer`. Confirm the active publisher, package page,
-clean installation, and release URL after that first publication.
+As of 2026-08-20, the pending publisher was registered with the exact values
+above and the first OIDC publication completed successfully. The publisher is
+now active for `fast-video-analyzer`; the package API reports version `0.1.0`,
+and a clean virtual environment installed that exact version from PyPI and
+passed `fast-video-analyzer --help` plus `doctor --offline`.
+
+Evidence for the first publication:
+
+- GitHub Actions run: `32341261708`
+- GitHub Release: <https://github.com/berdan-labs/fast-video-analyzer/releases/tag/v0.1.0>
+- PyPI release: <https://pypi.org/project/fast-video-analyzer/0.1.0/>
+- PyPI JSON API: <https://pypi.org/pypi/fast-video-analyzer/0.1.0/json>
+
+The successful OIDC upload is the authoritative activation evidence; the
+account settings page may still require an interactive password confirmation
+to display the publisher record.
 
 PyPI pending publishers do not reserve the project name until the first
 successful upload. Register it immediately before the first release and publish
