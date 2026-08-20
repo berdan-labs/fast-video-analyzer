@@ -1,6 +1,6 @@
 # Review workflow
 
-Status: stable for the `v0.1.x` CLI surface.
+Status: stable for the `v0.2.x` CLI surface.
 
 `run` can produce a valid project whose status is `review_required`. That is
 not a failed analysis: deterministic evidence and validation are available,

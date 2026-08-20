@@ -1,6 +1,6 @@
 # Public contracts
 
-Status: current for the `v0.1.x` line. Last reviewed: 2026-08-20.
+Status: current for the `v0.2.x` line. Last reviewed: 2026-08-20.
 
 This document records the surfaces that users and integrations may rely on.
 It is intentionally smaller than the implementation and is maintained when a

@@ -6,10 +6,25 @@ intent.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.2.0] - 2026-08-20
+
 ### Added
 
 - A small synchronous typed Python facade for planning, running, validating,
   and inspecting review items without exposing pipeline internals.
+- Installed-wheel coverage proving the facade and `py.typed` marker work
+  outside the repository checkout.
+
+### Changed
+
+- The public Python contract now documents the stable `video_script_reconstructor.api`
+  import surface, immutable result snapshots, offline defaults, and exception
+  semantics.
+- The release candidate is backed by the controlled seven-lane model audit and
+  five-case deterministic corpus gate; the exact sanitized evidence will be
+  attached to the tagged GitHub release.
 
 ## [0.1.1] - 2026-08-20
 
