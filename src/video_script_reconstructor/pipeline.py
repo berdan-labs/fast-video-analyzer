@@ -7937,6 +7937,21 @@ def run_pipeline(
         else:
             blockers.append(f"Transcript stage blocked: {exc}")
             source_decision = f"No safe transcript could be selected: {exc}"
+    except BaseException as exc:
+        # KeyboardInterrupt/SystemExit must not leave a durable manifest saying
+        # that transcript work is still running.  The partial checkpoints and
+        # progress receipt remain intentionally intact for the next explicit
+        # resume, while the stage record makes the interrupted boundary clear
+        # to a human operator and to diagnostics.
+        detail = f"Interrupted during transcript stage: {type(exc).__name__}"
+        if str(exc):
+            detail += f": {exc}"
+        manifest.finish("transcript", "failed", detail)
+        try:
+            manifest.write(run_manifest_path)
+        except Exception:  # pragma: no cover - defensive persistence boundary
+            LOGGER.warning("Unable to persist interrupted transcript stage", exc_info=True)
+        raise
     finally:
         if parallel_survey_future is not None:
             try:

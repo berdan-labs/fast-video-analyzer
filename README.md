@@ -115,6 +115,10 @@ fast-video-analyzer models verify faster-whisper-large-v3
 fast-video-analyzer run "path/to/video.mp4" --subtitle-mode force-asr --output "path/to/analyzer-output" --preset strict --offline
 ```
 
+If an ASR run is interrupted, rerun the same command with the same output
+root. The resumable transcript checkpoints are retained, and the run manifest
+records the interrupted transcript stage instead of presenting a false success.
+
 `models fetch` is the explicit network-enabled preparation step; do not run it
 when working in a network-denied environment. Once the model is verified,
 `--offline` prevents the analysis run from downloading anything.
