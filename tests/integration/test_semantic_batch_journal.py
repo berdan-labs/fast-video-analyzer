@@ -122,3 +122,54 @@ def test_semantic_batch_journal_recovers_after_provider_failure_without_duplicat
     assert len(canonical_ids) == len(set(canonical_ids))
     assert canonical_ids == ledger_ids
     assert validate_project(result.project_dir, use_cached_file_hash=True).valid
+
+
+def test_semantic_batch_journal_recovers_after_ledger_write_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = _generate(tmp_path / "fixtures")
+    from video_script_reconstructor.pipeline import run_pipeline
+
+    result = run_pipeline(
+        fixtures / "slide-lecture.mp4",
+        output_root=tmp_path / "out",
+        subtitles=[fixtures / "slide-lecture.srt"],
+        vision_mode="none",
+    )
+    import video_script_reconstructor.semantic_pipeline as semantic_module
+
+    original_atomic_write_json = semantic_module.atomic_write_json
+    injected = False
+
+    def fail_ledger_materialization(path: Path, payload: object, **kwargs: object) -> None:
+        nonlocal injected
+        if path.name == "image-observations.json" and not injected:
+            injected = True
+            raise OSError("simulated semantic ledger write failure")
+        original_atomic_write_json(path, payload, **kwargs)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(semantic_module, "atomic_write_json", fail_ledger_materialization)
+        with pytest.raises(OSError, match="simulated semantic ledger write failure"):
+            apply_vision_provider(result.project_dir, FixtureVisionProvider())
+
+    assert injected
+    journal = result.project_dir / ".state" / "checkpoints" / "semantic-batch-journal.jsonl"
+    assert journal.is_file()
+    interrupted = _project_payload(result.project_dir)
+    assert interrupted["visual_observations"]
+
+    resumed = apply_vision_provider(result.project_dir, FixtureVisionProvider())
+    assert resumed["semantic_batch_journal_recovered_candidate_ids"]
+    assert not journal.exists()
+    canonical = _project_payload(result.project_dir)
+    ledger = json.loads(
+        (result.project_dir / ".state" / "vision" / "image-observations.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    canonical_ids = [item["observation_id"] for item in canonical["visual_observations"]]
+    ledger_ids = [item["observation_id"] for item in ledger["observations"]]
+    assert len(canonical_ids) == len(set(canonical_ids))
+    assert canonical_ids == ledger_ids
+    assert validate_project(result.project_dir, use_cached_file_hash=True).valid
