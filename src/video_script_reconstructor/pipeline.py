@@ -7558,6 +7558,21 @@ def run_pipeline(
         event = dict(payload)
         event.setdefault("stage", "transcript")
         event.setdefault("updated_at_utc", _now())
+        if event.get("event") == "chunk_heartbeat":
+            # Heartbeats may arrive from the decoder-observer thread while a
+            # native call is blocked. Keep them out of the mutable manifest so
+            # they cannot race the parallel visual-survey writer; the atomic
+            # progress receipt is the durable stall-observation surface.
+            atomic_write_json(
+                asr_progress_path,
+                {"schema_version": "1.0", **_bounded_asr_progress_event(event)},
+            )
+            if progress_callback is not None:
+                try:
+                    progress_callback(event)
+                except Exception:  # pragma: no cover - optional UI telemetry boundary
+                    LOGGER.warning("ASR progress callback failed", exc_info=True)
+            return
         persisted_event = _bounded_asr_progress_event(event)
         manifest.update_performance("asr", persisted_event)
         if ".state/asr-progress.json" not in manifest.artifacts:

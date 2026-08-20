@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -219,6 +220,39 @@ def test_public_video_without_subtitle_uses_model_independent_asr(
     )
     assert (result.project_dir / ".state" / "asr-progress.json").is_file()
     assert progress_events[-1]["event"] == "completed"
+
+
+def test_pipeline_persists_asr_heartbeat_without_manifest_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = _generate(tmp_path / "fixtures")
+    monkeypatch.setenv("VSR_ASR_PROGRESS_HEARTBEAT_SECONDS", "0.01")
+    progress_events: list[dict[str, object]] = []
+
+    def recognize(_path: Path, **kwargs: object):
+        time.sleep(0.08)
+        start = int(kwargs["interval_start_ms"])
+        end = int(kwargs["interval_end_ms"])
+        return [_segment("heartbeat", start, end, "Heartbeat-safe transcript.")]
+
+    result = run_pipeline(
+        fixtures / "audio-only.wav",
+        output_root=tmp_path / "out",
+        asr_adapter=ModelIndependentASRAdapter(recognize),
+        vision_mode="none",
+        progress_callback=lambda payload: progress_events.append(dict(payload)),
+    )
+
+    assert any(event["event"] == "chunk_heartbeat" for event in progress_events)
+    assert progress_events[-1]["event"] == "completed"
+    progress = json.loads(
+        (result.project_dir / ".state" / "asr-progress.json").read_text(encoding="utf-8")
+    )
+    assert progress["event"] == "completed"
+    manifest = json.loads(
+        (result.project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["performance"]["asr"]["event"] == "completed"
 
 
 def test_completed_empty_asr_uses_explicit_visual_only_fallback(tmp_path: Path) -> None:

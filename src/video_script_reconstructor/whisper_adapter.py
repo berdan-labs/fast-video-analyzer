@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -15,6 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequenc
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from hashlib import sha256
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 from .ids import deterministic_id
@@ -1127,12 +1129,16 @@ def transcribe_checkpointed_chunks(
     media_sha256: str | None = None,
     shared_cache_dir: str | Path | None = None,
     progress_callback: ASRProgressCallback | None = None,
+    progress_heartbeat_seconds: float | None = None,
 ) -> ASRResult:
     """Transcribe bounded overlapping chunks and atomically resume valid checkpoints.
 
     ``progress_callback`` is deliberately observational: callback failures are
     logged and never invalidate an otherwise valid ASR checkpoint.  This keeps
     progress/ETA reporting from becoming a new reconstruction failure mode.
+    While a native decoder is running, an optional heartbeat is emitted from a
+    daemon thread so a long or stalled chunk remains distinguishable from a
+    dead process. Heartbeats do not interrupt, retry, or change decoder output.
     """
 
     source = Path(media_path)
@@ -1141,6 +1147,17 @@ def transcribe_checkpointed_chunks(
     end_ms = duration_ms if interval_end_ms is None else interval_end_ms
     if duration_ms <= 0 or end_ms > duration_ms:
         raise ASRError("Checkpointed ASR interval exceeds the supplied media duration")
+    heartbeat_value: str | float
+    if progress_heartbeat_seconds is None:
+        heartbeat_value = os.environ.get("VSR_ASR_PROGRESS_HEARTBEAT_SECONDS", "").strip() or "60"
+    else:
+        heartbeat_value = progress_heartbeat_seconds
+    try:
+        heartbeat_seconds = float(heartbeat_value)
+    except (TypeError, ValueError) as exc:
+        raise ASRError("ASR progress heartbeat interval must be a finite non-negative number") from exc
+    if not math.isfinite(heartbeat_seconds) or heartbeat_seconds < 0:
+        raise ASRError("ASR progress heartbeat interval must be a finite non-negative number")
     ranges = _chunk_ranges(interval_start_ms, end_ms, chunk_ms, overlap_ms)
     cache_key = checkpoint_cache_key(
         adapter,
@@ -1259,25 +1276,71 @@ def transcribe_checkpointed_chunks(
                 and chunk_end_ms == duration_ms
                 and getattr(adapter, "supports_full_media_passthrough", False)
             )
-            if full_media_passthrough:
-                # The complete-media request is semantically equivalent to the
-                # bounded [0, duration] request for this explicitly opted-in
-                # adapter. Avoiding a temporary WAV saves a full container
-                # decode/remux while preserving decoder settings and timestamps.
-                raw_result = adapter.transcribe(
-                    source,
-                    language=resolved_language,
-                    word_timestamps=True,
+            heartbeat_stop = Event()
+            heartbeat_thread: Thread | None = None
+            if progress_callback is not None and heartbeat_seconds > 0:
+
+                def emit_heartbeats(
+                    *,
+                    stop_event: Event = heartbeat_stop,
+                    chunk_index: int = index,
+                    chunk_start_ms: int = start_ms,
+                    chunk_end: int = chunk_end_ms,
+                    started_at: float = chunk_started,
+                    checkpoint_path: Path = checkpoint,
+                    interval_seconds: float = heartbeat_seconds,
+                ) -> None:
+                    while not stop_event.wait(interval_seconds):
+                        notify(
+                            {
+                                "event": "chunk_heartbeat",
+                                "backend": getattr(adapter, "backend_name", None),
+                                "chunk_index": chunk_index,
+                                "total_chunks": total_chunks,
+                                "start_ms": chunk_start_ms,
+                                "end_ms": chunk_end,
+                                "completed_chunks": len(chunk_results),
+                                "fraction": round(len(chunk_results) / total_chunks, 6)
+                                if total_chunks
+                                else 1.0,
+                                "elapsed_seconds": round(
+                                    time.monotonic() - started_at, 6
+                                ),
+                                "heartbeat_interval_seconds": interval_seconds,
+                                "checkpoint": str(checkpoint_path),
+                            }
+                        )
+
+                heartbeat_thread = Thread(
+                    target=emit_heartbeats,
+                    name=f"vsr-asr-heartbeat-{index}",
+                    daemon=True,
                 )
-            else:
-                raw_result = adapter.transcribe(
-                    source,
-                    interval_start_ms=start_ms,
-                    interval_end_ms=chunk_end_ms,
-                    context_padding_ms=0,
-                    language=resolved_language,
-                    word_timestamps=True,
-                )
+                heartbeat_thread.start()
+            try:
+                if full_media_passthrough:
+                    # The complete-media request is semantically equivalent to the
+                    # bounded [0, duration] request for this explicitly opted-in
+                    # adapter. Avoiding a temporary WAV saves a full container
+                    # decode/remux while preserving decoder settings and timestamps.
+                    raw_result = adapter.transcribe(
+                        source,
+                        language=resolved_language,
+                        word_timestamps=True,
+                    )
+                else:
+                    raw_result = adapter.transcribe(
+                        source,
+                        interval_start_ms=start_ms,
+                        interval_end_ms=chunk_end_ms,
+                        context_padding_ms=0,
+                        language=resolved_language,
+                        word_timestamps=True,
+                    )
+            finally:
+                heartbeat_stop.set()
+                if heartbeat_thread is not None:
+                    heartbeat_thread.join()
             result = normalize_asr_result(raw_result, source=adapter.backend_name)
             if full_media_passthrough:
                 result.metadata.setdefault("full_media_passthrough", True)

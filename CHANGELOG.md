@@ -12,6 +12,12 @@ intent.
   and transcript-only SRT input. These cases validate modality routing and
   parsing; they do not claim real-model accuracy.
 
+### Changed
+
+- Long-running native ASR chunks now emit owner-local progress heartbeats so a
+  blocked decoder is distinguishable from a dead process; heartbeats never
+  imply chunk completion or alter transcript output.
+
 ## [0.2.0] - 2026-08-20
 
 ### Added

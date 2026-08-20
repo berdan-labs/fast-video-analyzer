@@ -43,6 +43,9 @@ Last reviewed: 2026-08-20
   detailed agent prompt remains owner-local.
 - [x] Separate durable public repository truth from owner-local planning,
   private triage, raw evaluation output, and machine-specific working files.
+- [x] Make long-running native ASR calls observable with owner-local heartbeat
+  receipts without adding automatic interruption, retry, or false-success
+  behavior.
 
 ## Owner decisions and external setup
 
