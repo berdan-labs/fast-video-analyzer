@@ -298,6 +298,69 @@ def test_blocked_video_resume_retries_transcript_before_cache_return(
     assert canonical["state_metadata"]["reconstruction_mode"] == "visual_only_no_speech"
 
 
+def test_interrupted_transcript_stage_is_durable_and_resumable(tmp_path: Path) -> None:
+    fixtures = _generate(tmp_path / "fixtures")
+    audio = tmp_path / "interruptible.wav"
+    subprocess.run(
+        [
+            _ffmpeg(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(fixtures / "talking-head.mp4"),
+            "-vn",
+            "-c:a",
+            "pcm_s16le",
+            str(audio),
+        ],
+        check=True,
+    )
+    interrupted = True
+
+    def recognize(path: Path, **kwargs: object):
+        del path, kwargs
+        if interrupted:
+            raise KeyboardInterrupt("simulated user stop")
+        return [_segment("resume-1", 0, 4_000, "Resumed exact audio transcript.")]
+
+    adapter = ModelIndependentASRAdapter(
+        recognize,
+        name="interruptible-fixture",
+        cache_identity="interruptible-fixture-v1",
+    )
+    output_root = tmp_path / "out"
+    with pytest.raises(KeyboardInterrupt, match="simulated user stop"):
+        run_pipeline(audio, output_root=output_root, asr_adapter=adapter, vision_mode="none")
+
+    project_dir = output_root / "interruptible"
+    interrupted_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert interrupted_manifest["stages"]["identity"]["status"] == "completed"
+    assert interrupted_manifest["stages"]["transcript"]["status"] == "failed"
+    assert "KeyboardInterrupt" in interrupted_manifest["stages"]["transcript"]["detail"]
+    assert not (project_dir / ".state" / "canonical-project.json").exists()
+
+    interrupted = False
+    resumed = run_pipeline(
+        audio,
+        output_root=output_root,
+        asr_adapter=adapter,
+        vision_mode="none",
+        resume=True,
+    )
+    assert resumed.validation is not None and resumed.validation.valid
+    resumed_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert resumed_manifest["stages"]["transcript"]["status"] == "completed"
+    assert _canonical(resumed)["transcript_segments"][0]["raw_text"] == (
+        "Resumed exact audio transcript."
+    )
+
+
 def test_compare_all_runs_asr_alongside_supplied_subtitles(
     tmp_path: Path,
 ) -> None:
