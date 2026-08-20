@@ -55,14 +55,16 @@ in an owner-local manifest beside the development plan.
 
 The checked-in generated cases cover clean English speech, a sparse talking
 head, a slide lecture, a screen tutorial with visible state change, WebVTT and
-ASS caption candidates, and a hostile subtitle-text case containing Markdown,
-HTML, a filesystem-looking path, and a shell-like command. The manifest still
-marks Filipino/code-switching, overlapping speakers, audio-only and
-transcript-only inputs, hostile OCR text, media pathologies, long durations,
-and visual-only inputs as `gap`. The caption case proves format parsing and
-auditable candidate selection only; it is not an ASR, OCR, multilingual, or
-overlap benchmark. Those entries are deliberate collection work, not claims
-that the current seed already measures them. The evaluator will produce scored
+ASS caption candidates, a hostile subtitle-text case containing Markdown,
+HTML, a filesystem-looking path, and a shell-like command, plus standalone
+audio and transcript-only inputs. The audio-only case uses a deterministic
+subtitle sidecar, and the transcript-only case uses a standalone SRT; both
+prove modality routing, parsing, validation, and provenance boundaries only.
+They are not ASR, OCR, multilingual, overlap, or visual-only accuracy
+benchmarks. The manifest still marks Filipino/code-switching, overlapping
+speakers, hostile OCR text, media pathologies, long durations, and visual-only
+inputs as `gap`. Those entries are deliberate collection work, not claims that
+the current seed already measures them. The evaluator will produce scored
 quality and performance reports for new cases once they have licensed or
 owner-controlled sources; the deterministic seed evaluator runs all current
 cases in ordinary CI.

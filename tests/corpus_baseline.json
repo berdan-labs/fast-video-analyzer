@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "scoring_version": "1.0",
-  "corpus_hash": "75bee050bf8ebfe48754f63ed2cea288da7acdb8fc13fb754bffa44872e51719",
+  "corpus_hash": "c492f471c1d1e1dcd517b0a5a81d25ddd197243bb8ddca713ed581892d09cb8c",
   "model_revision": "deterministic-fixtures",
   "performance": {
     "max_regression_fraction": 0.15,
@@ -10,6 +10,8 @@
       "generated-slide-lecture": null,
       "generated-screen-tutorial": null,
       "generated-hostile-subtitle": null,
+      "generated-audio-only": null,
+      "generated-transcript-only": null,
       "generated-caption-variants": null
     }
   },
@@ -39,6 +41,20 @@
       "quality": {
         "expected_spoken_count": 2,
         "expected_token_count": 2,
+        "minimum_visual_events": 0
+      }
+    },
+    "generated-audio-only": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 0,
+        "minimum_visual_events": 0
+      }
+    },
+    "generated-transcript-only": {
+      "quality": {
+        "expected_spoken_count": 2,
+        "expected_token_count": 0,
         "minimum_visual_events": 0
       }
     },

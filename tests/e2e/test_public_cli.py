@@ -25,6 +25,9 @@ def test_public_cli_decodes_video_and_validates_single_artifact(tmp_path: Path) 
     assert (fixtures / "hostile-subtitle.srt").is_file()
     assert (fixtures / "caption-variants.vtt").is_file()
     assert (fixtures / "caption-variants.ass").is_file()
+    assert (fixtures / "audio-only.wav").is_file()
+    assert (fixtures / "audio-only.srt").is_file()
+    assert (fixtures / "transcript-only.srt").is_file()
     output = tmp_path / "output"
     run = subprocess.run(
         [

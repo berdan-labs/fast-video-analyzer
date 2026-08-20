@@ -42,8 +42,8 @@
     },
     {
       "id": "audio-only-and-transcript-only",
-      "status": "gap",
-      "case_ids": []
+      "status": "covered",
+      "case_ids": ["generated-audio-only", "generated-transcript-only"]
     },
     {
       "id": "subtitle-and-caption-variants",
@@ -209,6 +209,68 @@
           "C:\\Users\\demo\\notes.md && echo \"$HOME\""
         ],
         "tokens": ["--strict", "C:\\Users\\demo\\notes.md"],
+        "minimum_visual_events": 0
+      }
+    },
+    {
+      "id": "generated-audio-only",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "audio-only",
+        "sidecar-subtitle",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/audio-only.wav",
+        "sha256": "b52dc4883fb464535ddb38e0c73fc1f5b586ffd2d4befcb8534e3afe5e4aa2f7"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/audio-only.srt",
+          "sha256": "8ceb17b3047c6296623cf7f19c8d4ff600fcc67c87db79ae2051bbcdd5c3d534"
+        }
+      ],
+      "expected": {
+        "spoken": [
+          "This audio-only fixture is complete.",
+          "The source has no video frames."
+        ],
+        "tokens": [],
+        "minimum_visual_events": 0
+      }
+    },
+    {
+      "id": "generated-transcript-only",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "transcript-only",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/transcript-only.srt",
+        "sha256": "5ac71df05579290bed723f2efa682073abc0fe6d53ba488b54aeea165c1fc954"
+      },
+      "subtitles": [],
+      "expected": {
+        "spoken": [
+          "This transcript-only fixture is complete.",
+          "No media is required."
+        ],
+        "tokens": [],
         "minimum_visual_events": 0
       }
     },
