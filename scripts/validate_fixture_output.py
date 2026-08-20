@@ -56,22 +56,43 @@ def validate_fixture_output(
                         evidence_text_parts.append(str(value))
                         break
     contract_text = "\n".join(evidence_text_parts) or text
+    spoken_text_parts: list[str] = []
+    if canonical is not None and isinstance(canonical.get("transcript_segments"), list):
+        for segment in canonical["transcript_segments"]:
+            if not isinstance(segment, dict):
+                continue
+            for key in ("human_verified_text", "repaired_text", "normalized_text", "raw_text"):
+                value = segment.get(key)
+                if value:
+                    spoken_text_parts.append(str(value))
+                    break
+    spoken_contract_text = "\n".join(spoken_text_parts) or contract_text
     positions: list[int] = []
+    spoken_matches = 0
     for sentence in expected_spoken:
-        count = contract_text.count(sentence)
+        count = spoken_contract_text.count(sentence)
         if count != 1:
             errors.append(
                 f"fixture_content: expected spoken sentence {sentence!r} exactly once, found {count}"
             )
-        positions.append(contract_text.find(sentence))
+        else:
+            spoken_matches += 1
+        positions.append(spoken_contract_text.find(sentence))
     if positions and (
         any(position < 0 for position in positions) or positions != sorted(positions)
     ):
         errors.append("fixture_content: expected spoken sentences are absent or out of order")
 
+    token_matches = 0
     for token in expected_tokens:
         if token not in contract_text:
             errors.append(f"fixture_content: expected exact token {token!r} is missing")
+        else:
+            token_matches += 1
+
+    visual_event_count = 0
+    if canonical is not None and isinstance(canonical.get("visual_events"), list):
+        visual_event_count = len(canonical["visual_events"])
 
     if expected_status is not None:
         actual_status = canonical.get("project_status") if canonical else None
@@ -89,8 +110,11 @@ def validate_fixture_output(
         "checks": {
             **production.checks,
             "expected_spoken_count": len(expected_spoken),
+            "expected_spoken_matches": spoken_matches,
             "expected_token_count": len(expected_tokens),
+            "expected_token_matches": token_matches,
             "expected_status": expected_status,
+            "visual_event_count": visual_event_count,
         },
     }
 

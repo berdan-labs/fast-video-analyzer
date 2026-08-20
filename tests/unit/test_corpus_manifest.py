@@ -66,7 +66,7 @@ def test_external_case_requires_reference_but_not_a_checked_out_file() -> None:
                     "source_reference": "corpus-store://licensed-long-form",
                 },
                 "subtitles": [],
-                "expected": {"spoken": [], "tokens": []},
+                "expected": {"spoken": [], "tokens": [], "minimum_visual_events": 0},
             }
         ],
     }

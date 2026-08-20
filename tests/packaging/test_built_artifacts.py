@@ -27,11 +27,13 @@ def test_sdist_contains_validator_and_source_contract(installed_wheel: Installed
         names = {name.split("/", 1)[-1] for name in archive.getnames() if "/" in name}
     required = {
         "scripts/validate_fixture_output.py",
+        "scripts/evaluate_corpus.py",
         "scripts/validate_corpus_manifest.py",
         "configs/strict.yaml",
         "configs/schema.json",
         "src/video_script_reconstructor/validate_output.py",
         "tests/acceptance_manifest.json",
+        "tests/corpus_baseline.json",
         "tests/corpus_manifest.json",
         "SKILL.md",
     }
