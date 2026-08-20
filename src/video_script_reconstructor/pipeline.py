@@ -7439,7 +7439,19 @@ def run_pipeline(
             cache_contract_complete = not old_project.get("frames") or bool(
                 old_project.get("sufficiency_decisions")
             )
-            if old_manifest.get("run_cache_key") == run_key and cache_contract_complete:
+            # New runs publish a processing/finalizing marker before the
+            # canonical transaction.  Never treat a matching partial tree as
+            # a cache hit until the marker says finalization completed.  A
+            # missing marker is retained only for one-time legacy migration.
+            finalization_complete = old_manifest.get("run_state") in {
+                None,
+                "completed",
+            }
+            if (
+                old_manifest.get("run_cache_key") == run_key
+                and cache_contract_complete
+                and finalization_complete
+            ):
                 validation = read_trusted_validation_receipt(
                     project_dir,
                     old_project,
@@ -8508,6 +8520,12 @@ def run_pipeline(
         }
     )
 
+    # Mark the canonical transaction before its first write.  If a process
+    # stops after canonical JSON exists but before the remaining state and
+    # validation receipt settle, resume must rebuild rather than trust a
+    # partially committed tree as an unchanged cache hit.
+    manifest.run_state = "finalizing"
+    manifest.write(run_manifest_path)
     manifest.artifacts = [
         markdown_path.name,
         ".state/canonical-project.json",
@@ -8928,6 +8946,12 @@ def run_pipeline(
                 run_cache_key=run_key,
                 validation=validation,
             )
+            # The receipt now proves the evidence tree. Publish the completed
+            # transaction marker before the final telemetry fixed-point loop so
+            # the host-agent bundle (when present) hashes the same canonical
+            # state that the caller receives.
+            manifest.run_state = "completed"
+            project_manifest["run_state"] = "completed"
             # Refreshing the receipt can change its encoded size when the
             # canonical-file signature crosses a decimal-width boundary. That
             # receipt is part of output telemetry, so settle the two mutable
