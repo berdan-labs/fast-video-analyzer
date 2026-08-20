@@ -18,10 +18,12 @@ SOURCE_KINDS = {"generated", "licensed", "owner_controlled"}
 AVAILABILITIES = {"repository", "external"}
 COVERAGE_STATUSES = {"covered", "gap"}
 TEXT_SUFFIXES = {
+    ".ass",
     ".csv",
     ".json",
     ".md",
     ".srt",
+    ".ssa",
     ".tsv",
     ".txt",
     ".vtt",

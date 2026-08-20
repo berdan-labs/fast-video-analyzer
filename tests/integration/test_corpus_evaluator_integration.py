@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,4 +35,21 @@ def test_generated_seed_runs_through_manifest_evaluator(tmp_path: Path) -> None:
         "generated-slide-lecture",
         "generated-screen-tutorial",
         "generated-hostile-subtitle",
+        "generated-caption-variants",
     }
+
+    caption_project = Path(report["cases"]["generated-caption-variants"]["project_dir"])
+    canonical = json.loads(
+        (caption_project / ".state" / "canonical-project.json").read_text(encoding="utf-8")
+    )
+    candidates = canonical["transcript_candidates"]
+    assert {item["origin"] for item in candidates} == {
+        "caption-variants.vtt",
+        "caption-variants.ass",
+    }
+    assert {item["segments"][0]["timing_provenance"] for item in candidates} == {
+        "source_vtt",
+        "source_ass",
+    }
+    selected = [item for item in candidates if item["decision_rationale"].startswith("Selected as")]
+    assert len(selected) == 1

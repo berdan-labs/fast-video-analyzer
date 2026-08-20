@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -38,6 +39,15 @@ def test_manifest_reports_hash_drift(tmp_path: Path) -> None:
         _manifest_module().load_and_validate_manifest(path, repo_root=ROOT, verify_files=False)
         == []
     )
+
+
+def test_ass_sidecar_hash_normalizes_checkout_newlines(tmp_path: Path) -> None:
+    path = tmp_path / "captions.ass"
+    path.write_bytes(b"[Events]\r\nDialogue: 0,0:00:00.00,0:00:01.00\r\n")
+
+    digest = _manifest_module()._sha256(path)
+
+    assert digest == hashlib.sha256(b"[Events]\nDialogue: 0,0:00:00.00,0:00:01.00\n").hexdigest()
 
 
 def test_external_case_requires_reference_but_not_a_checked_out_file() -> None:
