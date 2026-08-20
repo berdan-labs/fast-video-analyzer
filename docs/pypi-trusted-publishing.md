@@ -26,6 +26,14 @@ Use these exact values:
 | Workflow file | `release.yml` |
 | Environment | `pypi` |
 
+## Current status
+
+As of 2026-08-20, PyPI shows a pending publisher registered with the exact
+values above. The package does not exist on PyPI yet, so the publisher will
+become an ordinary active publisher only after the first successful release
+creates `fast-video-analyzer`. Confirm the active publisher, package page,
+clean installation, and release URL after that first publication.
+
 PyPI pending publishers do not reserve the project name until the first
 successful upload. Register it immediately before the first release and publish
 without delay. Do not create or store a `PYPI_TOKEN` secret.
