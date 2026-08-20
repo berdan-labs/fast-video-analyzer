@@ -3,6 +3,11 @@
 `fast-video-analyzer` is the canonical console entrypoint. These two historical
 names remain supported for existing scripts and automation:
 
+For the complete status inventory—including exit codes, result fields, Python
+imports, schemas, environment variables, and deprecation policy—see
+[public-contracts.md](public-contracts.md). This page stays focused on
+entrypoint and alias compatibility.
+
 | Entry point | Compatibility status |
 | --- | --- |
 | `fast-video-analyzer` | Canonical |
