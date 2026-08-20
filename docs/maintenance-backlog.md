@@ -50,8 +50,12 @@ Last reviewed: 2026-08-20
 - [x] Publish the first tagged release through the pending publisher, then
   verify the active PyPI publisher, package page, clean installation, and
   release URL (`v0.1.0`, GitHub Actions run `32341261708`).
-- [ ] Choose encrypted external backup storage, create the first off-GitHub
-  mirror, and record a successful restore drill.
+- [x] Create the first off-GitHub mirror in the verified EFS-encrypted
+  `E:\Encrypted-Backups\fast-video-analyzer` destination and record a
+  successful restore drill for main commit `3d3bc4c`.
+- [ ] Export and retain an EFS recovery certificate in a separately protected,
+  owner-controlled location; Windows currently reports no recovery
+  certificate.
 
 ## Planned engineering follow-ups
 

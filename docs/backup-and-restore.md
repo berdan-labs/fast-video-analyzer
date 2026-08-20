@@ -66,3 +66,24 @@ real recovery, explicitly recreate branch protection, Actions permissions,
 environments, secrets, webhook/App integrations, and the PyPI Trusted Publisher
 only after reviewing the snapshot. Rotate any credentials involved in the
 incident instead of restoring them from an old location.
+
+## Current backup record
+
+On 2026-08-20, the first off-GitHub mirror was created at:
+
+```text
+E:\Encrypted-Backups\fast-video-analyzer\berdan-labs-fast-video-analyzer-20260820T070202Z
+```
+
+The parent directory is EFS-encrypted with AES-256; a new-file inheritance
+sentinel and representative backup files were verified with `cipher /c`. The
+backup helper's checksum verification passed and recorded main commit
+`3d3bc4c0d792eaff0c561f03c564ae889af180be`. A fresh restore outside the backup
+directory completed with `--run-contract`, including the repository maintenance
+verifier, and the temporary restore checkout was then removed.
+
+Windows currently reports **no EFS recovery certificate**. Before relying on
+this location for machine-loss recovery, the owner must export and retain the
+EFS recovery certificate in a separately protected owner-controlled location.
+Do not place that certificate or any private key in the repository or backup
+mirror.
