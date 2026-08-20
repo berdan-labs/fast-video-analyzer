@@ -679,6 +679,7 @@ class StageRecord(StrictModel):
 class RunManifest(StrictModel):
     schema_version: str = "1.0"
     run_id: str
+    run_state: Literal["processing", "finalizing", "completed"] = "processing"
     input_identity: dict[str, Any]
     source_hashes: dict[str, str] = Field(default_factory=dict)
     source_config_hash: str | None = None

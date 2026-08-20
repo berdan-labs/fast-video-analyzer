@@ -361,6 +361,89 @@ def test_interrupted_transcript_stage_is_durable_and_resumable(tmp_path: Path) -
     )
 
 
+def test_partial_finalization_marker_forces_rebuild_before_cache_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = _generate(tmp_path / "fixtures")
+    audio = tmp_path / "partial-finalization.wav"
+    subprocess.run(
+        [
+            _ffmpeg(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(fixtures / "talking-head.mp4"),
+            "-vn",
+            "-c:a",
+            "pcm_s16le",
+            str(audio),
+        ],
+        check=True,
+    )
+    adapter = ModelIndependentASRAdapter(
+        lambda path, **kwargs: [_segment("partial-1", 0, 4_000, "Partial write transcript.")],
+        name="partial-finalization-fixture",
+        cache_identity="partial-finalization-fixture-v1",
+    )
+    output_root = tmp_path / "out"
+    import video_script_reconstructor.pipeline as pipeline_module
+
+    original_atomic_write_json = pipeline_module.atomic_write_json
+    injected = False
+
+    def fail_after_canonical(path: Path, payload: object, **kwargs: object) -> None:
+        nonlocal injected
+        if (
+            path.name == "run-manifest.json"
+            and isinstance(payload, dict)
+            and payload.get("run_state") == "finalizing"
+            and payload.get("run_cache_key")
+            and not injected
+        ):
+            injected = True
+            raise OSError("simulated finalization write failure")
+        original_atomic_write_json(path, payload, **kwargs)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(pipeline_module, "atomic_write_json", fail_after_canonical)
+        with pytest.raises(OSError, match="simulated finalization write failure"):
+            run_pipeline(
+                audio,
+                output_root=output_root,
+                asr_adapter=adapter,
+                vision_mode="none",
+            )
+
+    assert injected
+    project_dir = output_root / "partial-finalization"
+    interrupted_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert interrupted_manifest["run_state"] == "finalizing"
+    interrupted_canonical = json.loads(
+        (project_dir / ".state" / "canonical-project.json").read_text(encoding="utf-8")
+    )
+    assert interrupted_canonical["manifest"]["run_state"] == "finalizing"
+    assert not (project_dir / ".state" / "validation-receipt.json").exists()
+
+    resumed = run_pipeline(
+        audio,
+        output_root=output_root,
+        asr_adapter=adapter,
+        vision_mode="none",
+        resume=True,
+    )
+    assert resumed.validation is not None and resumed.validation.valid
+    completed_manifest = json.loads(
+        (project_dir / ".state" / "run-manifest.json").read_text(encoding="utf-8")
+    )
+    assert completed_manifest["run_state"] == "completed"
+    assert _canonical(resumed)["manifest"]["run_state"] == "completed"
+    assert (project_dir / ".state" / "validation-receipt.json").exists()
+
+
 def test_compare_all_runs_asr_alongside_supplied_subtitles(
     tmp_path: Path,
 ) -> None:

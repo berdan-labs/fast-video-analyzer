@@ -38,6 +38,7 @@ class ManifestBuilder:
     run_id: str
     input_identity: dict[str, Any]
     config_hash: str
+    run_state: str = "processing"
     commands: list[list[str]] = field(default_factory=list)
     stages: dict[str, StageRecord] = field(default_factory=dict)
     network_activity: list[dict[str, Any]] = field(default_factory=list)
@@ -95,6 +96,7 @@ class ManifestBuilder:
                 {
                     "schema_version": "1.0",
                     "run_id": self.run_id,
+                    "run_state": self.run_state,
                     "input_identity": self.input_identity,
                     "source_hashes": source_hashes,
                     "source_config_hash": self.config_hash,
