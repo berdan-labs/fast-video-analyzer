@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from video_script_reconstructor.errors import ValidationFailure
 from video_script_reconstructor.frame_extract import ExtractedFrame, extract_frames
 from video_script_reconstructor.frame_quality import normalized_pixel_hash
 from video_script_reconstructor.pipeline import (
@@ -558,6 +559,18 @@ def test_context_change_reuses_structural_survey_with_frames(
     source.write_bytes(b"deterministic source")
     project = tmp_path / "project"
     calls = 0
+    canonical_candidates = (
+        SurveyCandidate(
+            candidate_id="VC000001",
+            requested_ms=1_000,
+            actual_ms=1_002,
+            raw_pts=42,
+            time_base="1/1000",
+            reasons=("scene_cut",),
+            score=0.9,
+            timestamp_source="decoded-survey",
+        ),
+    )
 
     def fake_combined(*_args: object, **_kwargs: object):
         nonlocal calls
@@ -582,6 +595,10 @@ def test_context_change_reuses_structural_survey_with_frames(
     monkeypatch.setattr(
         "video_script_reconstructor.scene_detection.detect_combined_survey_frames",
         fake_combined,
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.survey_video_candidates",
+        lambda *_args, **_kwargs: canonical_candidates,
     )
     first, first_frames = _load_or_run_visual_survey_with_frames(
         source,
@@ -617,6 +634,62 @@ def test_context_change_reuses_structural_survey_with_frames(
     ]
 
 
+def test_shared_survey_retries_filter_allocation_with_smaller_schedule(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"deterministic source")
+    project = tmp_path / "project"
+    periodic_times = tuple(range(0, 160 * 30_000, 30_000))
+    attempted_counts: list[int] = []
+
+    def fake_combined(_source: Path, _output: Path, requested: Sequence[int], **_kwargs: object):
+        attempted_counts.append(len(requested))
+        if len(attempted_counts) == 1:
+            raise ValidationFailure(
+                "FFmpeg combined survey frame emission failed: "
+                "Error initializing filters: Cannot allocate memory"
+            )
+        return ((), (), ())
+
+    monkeypatch.setenv("VSR_DISABLE_VISUAL_SHARED_CACHE", "1")
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.detect_combined_survey_frames",
+        fake_combined,
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.survey_video_candidates",
+        lambda *_args, **_kwargs: (
+            SurveyCandidate(
+                candidate_id="VC000001",
+                requested_ms=0,
+                actual_ms=None,
+                raw_pts=None,
+                time_base=None,
+                reasons=("periodic_safety",),
+                score=0.25,
+                timestamp_source="requested-candidate",
+            ),
+        ),
+    )
+    candidates, shared_frames = _load_or_run_visual_survey_with_frames(
+        source,
+        project,
+        duration_ms=4_800_000,
+        interval_seconds=30.0,
+        strict=True,
+        scene_detection=True,
+        adaptive_detection=True,
+        speech_reference_times_ms=(),
+        periodic_times_ms=periodic_times,
+        frame_output_dir=project / "survey",
+    )
+
+    assert attempted_counts == [160, 128]
+    assert candidates
+    assert shared_frames == ()
+
+
 def test_structural_survey_receipt_reuses_across_projects(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -626,6 +699,18 @@ def test_structural_survey_receipt_reuses_across_projects(
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
     calls = 0
+    canonical_candidates = (
+        SurveyCandidate(
+            candidate_id="VC000001",
+            requested_ms=1_000,
+            actual_ms=1_002,
+            raw_pts=42,
+            time_base="1/1000",
+            reasons=("scene_cut",),
+            score=0.9,
+            timestamp_source="decoded-survey",
+        ),
+    )
 
     def fake_combined(*_args: object, **_kwargs: object):
         nonlocal calls
@@ -652,6 +737,10 @@ def test_structural_survey_receipt_reuses_across_projects(
     monkeypatch.setattr(
         "video_script_reconstructor.scene_detection.detect_combined_survey_frames",
         fake_combined,
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.survey_video_candidates",
+        lambda *_args, **_kwargs: canonical_candidates,
     )
     first, _ = _load_or_run_visual_survey_with_frames(
         source,
