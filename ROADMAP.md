@@ -9,9 +9,13 @@ The repository operating checklist lives in
 
 ## Current baseline
 
-- `v0.1.0` is published on GitHub and PyPI through Trusted Publishing.
+- `v0.2.0` is published on GitHub and PyPI through Trusted Publishing, with
+  release assets, SBOM, provenance attestations, and sanitized model-audit
+  evidence.
 - The public pipeline produces one chronological evidence-linked Markdown
   project and retains strict validation, provenance, and review gates.
+- The stable synchronous typed Python facade is available from
+  `video_script_reconstructor.api`; pipeline internals remain private.
 - Protected `main`, mandatory acceptance suites, CodeQL, cross-platform smoke
   tests, release provenance, and encrypted restore-tested backups are active.
 - The repository intentionally uses one administrator and zero required
@@ -21,6 +25,8 @@ The repository operating checklist lives in
 
 - Keep the PyPI-first user journey, one version authority, and public
   CLI/API/schema contracts green as the product changes.
+- Dogfood the released typed API and CLI from clean PyPI environments; promote
+  only measured friction or contract defects into public work.
 - Expand the manifest-driven evaluation corpus from the generated seed into
   licensed or owner-controlled cases without committing private media or raw
   benchmark output.
@@ -37,13 +43,14 @@ The repository operating checklist lives in
 ## Next
 
 - Improve transcript, OCR, visual-event, and semantic-review quality based on
-  measured corpus failures.
+  measured corpus failures from broader licensed or owner-controlled cases.
 - Enforce performance, memory, storage, and resume-regression budgets.
 - Extract bounded pipeline stages behind characterization tests instead of
   performing a broad rewrite.
 - Improve capability setup and human review throughput while preserving the
   local-first evidence contract.
-- Publish a small stable Python API before adding new integrations.
+- Add provider, batch, async, or review-mutation surfaces only after a bounded
+  user journey and compatibility proposal justify them.
 
 ## Later
 
