@@ -42,6 +42,27 @@ uv run python scripts/benchmark_pipeline.py \
   --preset strict --vision-mode none --no-resume --repeat 3
 ```
 
+`--no-resume` makes the project output cold: each iteration starts without
+that project's checkpoints. It does not disable the user-level shared ASR,
+visual-frame, or OCR caches, so the result can still be faster than a first run
+on a new host. For a cache-cold baseline, disable those accelerators explicitly
+for the benchmark process and keep the resulting report separate:
+
+```powershell
+$env:VSR_DISABLE_ASR_SHARED_CACHE = "1"
+$env:VSR_DISABLE_VISUAL_SHARED_CACHE = "1"
+uv run python scripts/benchmark_pipeline.py `
+  tests/fixtures/generated/caption-variants.mp4 `
+  --subtitle tests/fixtures/generated/caption-variants.vtt `
+  --subtitle tests/fixtures/generated/caption-variants.ass `
+  --output ../fast-video-analyzer-owner/performance/dev-301/cpu-short-cache-cold `
+  --preset strict --vision-mode none --no-resume --repeat 3
+```
+
+Record whether shared caches were enabled beside every owner-local report.
+Never compare a cache-cold p95 with a shared-cache-warm p95 as if they were the
+same workload.
+
 For the warm/resume journey, reuse one output root and omit `--no-resume`:
 
 ```bash
