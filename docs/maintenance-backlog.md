@@ -43,10 +43,13 @@ Last reviewed: 2026-08-20
 
 ## Owner decisions and external setup
 
-- [ ] Register PyPI's pending (or existing-project) Trusted Publisher for
-  `fast-video-analyzer`; GitHub's branch-restricted `pypi` environment and OIDC
-  workflow are ready. The authenticated PyPI account currently requires its
-  owner to enable 2FA before the Publishing settings can be opened.
+- [x] Register PyPI's pending Trusted Publisher for `fast-video-analyzer`;
+  PyPI now shows the exact `berdan-labs` / `fast-video-analyzer` / `release.yml`
+  / `pypi` entry, and GitHub's branch-restricted environment and OIDC workflow
+  are ready.
+- [ ] Publish the first tagged release through the pending publisher, then
+  verify the active PyPI publisher, package page, clean installation, and
+  release URL.
 - [ ] Choose encrypted external backup storage, create the first off-GitHub
   mirror, and record a successful restore drill.
 
