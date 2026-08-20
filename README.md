@@ -30,15 +30,29 @@ through the video, or use it as source material for an LLM or AI agent.
 ### Install
 
 ```bash
-pip install "git+https://github.com/berdan-labs/fast-video-analyzer.git"
+python -m pip install --upgrade fast-video-analyzer
 ```
+
+This installs the published package from PyPI. The base package supports the
+subtitle-led workflow below and does not download model weights. Install an
+optional capability only when you need it:
+
+```bash
+python -m pip install "fast-video-analyzer[asr]"  # local Whisper ASR
+python -m pip install "fast-video-analyzer[ocr]"  # Python OCR wrapper
+```
+
+The `asr` extra still requires a locally available, verified model before an
+offline ASR run. The `ocr` extra still requires a supported OCR executable.
+Use `fast-video-analyzer models list` and `fast-video-analyzer doctor --offline`
+to inspect capability readiness; optional model downloads are always explicit.
 
 ### Install from source
 
 ```bash
 git clone https://github.com/berdan-labs/fast-video-analyzer.git
 cd fast-video-analyzer
-pip install -e ".[asr,ocr]"
+python -m pip install -e ".[asr,ocr]"
 ```
 
 Verify your local environment:
@@ -57,25 +71,52 @@ fast-video-analyzer diagnostic-bundle --output fast-video-analyzer-diagnostic.zi
 
 ---
 
-## Quickstart
+## First successful run
 
-Analyze a video with an existing subtitle file:
-
-```bash
-fast-video-analyzer run "path/to/video.mp4" \
-  --subtitle "path/to/video.srt" \
-  --preset strict \
-  --offline
-```
-
-If no subtitles are provided, run with offline Whisper ASR:
+The subtitle-led path needs no model download. Run the commands from a clean
+working directory and replace the example paths with your own files:
 
 ```bash
-fast-video-analyzer run "path/to/video.mp4" \
-  --subtitle-mode force-asr \
-  --preset strict \
-  --offline
+fast-video-analyzer doctor --offline
+fast-video-analyzer run "path/to/video.mp4" --subtitle "path/to/video.srt" --output "path/to/analyzer-output" --preset strict --offline
+fast-video-analyzer validate "path/to/analyzer-output/video"
 ```
+
+The `run` command writes JSON to standard output. Use its `project_dir` and
+`markdown` fields to find the result. A `review_required` status and exit
+code `3` mean the evidence was produced but still needs human review; they are
+not the same as a failed or invalid project. The final `validate` command
+should exit `0` and report `"valid": true`.
+
+The output option is a root: the project directory is created below it using
+the source video stem. In the example above, it is
+`path/to/analyzer-output/video`.
+
+The output directory contains one Markdown report plus its evidence and state:
+
+```text
+path/to/analyzer-output/
+└── video/
+    ├── video.md
+    ├── evidence/
+    └── .state/
+```
+
+### Local ASR workflow
+
+After installing the `asr` and `models` extras, prepare a verified local model
+while network access is explicitly allowed:
+
+```bash
+python -m pip install "fast-video-analyzer[asr,models]"
+fast-video-analyzer models fetch faster-whisper-large-v3
+fast-video-analyzer models verify faster-whisper-large-v3
+fast-video-analyzer run "path/to/video.mp4" --subtitle-mode force-asr --output "path/to/analyzer-output" --preset strict --offline
+```
+
+`models fetch` is the explicit network-enabled preparation step; do not run it
+when working in a network-denied environment. Once the model is verified,
+`--offline` prevents the analysis run from downloading anything.
 
 The installed wheel also keeps the historical entrypoints working:
 
