@@ -45,7 +45,8 @@ Last reviewed: 2026-08-20
 
 - [ ] Register PyPI's pending (or existing-project) Trusted Publisher for
   `fast-video-analyzer`; GitHub's branch-restricted `pypi` environment and OIDC
-  workflow are ready, but the PyPI account step cannot be performed here.
+  workflow are ready. The authenticated PyPI account currently requires its
+  owner to enable 2FA before the Publishing settings can be opened.
 - [ ] Choose encrypted external backup storage, create the first off-GitHub
   mirror, and record a successful restore drill.
 
