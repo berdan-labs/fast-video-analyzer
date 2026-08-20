@@ -2000,6 +2000,13 @@ def _bounded_visual_block_points(
 
 _MAX_SHARED_SURVEY_EMISSION_TIMES = 256
 _VISUAL_TAIL_GUARD_MS = 250
+# Windows FFmpeg builds can reject an otherwise valid combined survey when the
+# periodic ``select`` expression grows too large for the filter graph allocator.
+# Keep the first attempt generous, then use deterministic smaller schedules
+# before falling all the way back to the guarded per-request extractor.  This
+# is an acceleration hint only: every omitted timestamp remains in the
+# candidate set and is recovered by exact extraction below.
+_SHARED_SURVEY_RETRY_CAPS = (128, 96, 64, 32, 16, 8, 1)
 
 
 def _bounded_shared_survey_emission_times(
@@ -2362,7 +2369,6 @@ def _load_or_run_visual_survey_with_frames(
         contextual_candidates,
         detect_combined_survey_frames,
         merge_survey_candidates,
-        periodic_candidates,
         survey_video_candidates,
     )
     # Resolve before ASR/visual worker overlap can mutate runtime search paths
@@ -2441,28 +2447,86 @@ def _load_or_run_visual_survey_with_frames(
         try:
             # ``periodic_times_ms`` can include a dense subtitle scaffold.
             # Keep the candidate set complete, but bound only the timestamps
-            # encoded into this single FFmpeg filter graph. Missing shared
-            # frames are recovered by exact extraction below.
-            emitted_periodic_times = _bounded_shared_survey_emission_times(
-                periodic_times_ms
+            # encoded into this single FFmpeg filter graph. Some Windows
+            # builds fail filter allocation before decoding when the generated
+            # expression is large; retry with a smaller deterministic schedule
+            # before giving up on shared frame acceleration. Missing shared
+            # frames are always recovered by exact extraction below.
+            ordered_periodic_times = tuple(sorted(set(int(value) for value in periodic_times_ms)))
+            initial_cap = min(_MAX_SHARED_SURVEY_EMISSION_TIMES, len(ordered_periodic_times))
+            attempt_caps = [initial_cap]
+            attempt_caps.extend(
+                cap
+                for cap in _SHARED_SURVEY_RETRY_CAPS
+                if cap < initial_cap and cap not in attempt_caps
             )
-            hard, adaptive, emitted = detect_combined_survey_frames(
+            last_emission_error: ValidationFailure | None = None
+            for attempt_index, cap in enumerate(attempt_caps):
+                emitted_periodic_times = _bounded_shared_survey_emission_times(
+                    ordered_periodic_times,
+                    max_count=max(1, cap),
+                )
+                try:
+                    # A failed FFmpeg graph may leave a sentinel or partial PNGs
+                    # behind. The directory is disposable survey state, so
+                    # clear it before retrying and never let stale files enter
+                    # the measured-frame validator.
+                    if attempt_index:
+                        frame_output_dir.mkdir(parents=True, exist_ok=True)
+                        for stale_path in frame_output_dir.iterdir():
+                            if stale_path.is_dir() and not stale_path.is_symlink():
+                                shutil.rmtree(stale_path, ignore_errors=True)
+                            elif not stale_path.is_symlink():
+                                stale_path.unlink(missing_ok=True)
+                    _hard, _adaptive, emitted = detect_combined_survey_frames(
+                        source,
+                        frame_output_dir,
+                        emitted_periodic_times,
+                        ffmpeg_threads=_visual_survey_ffmpeg_threads(),
+                        ffmpeg_bin=ffmpeg_path,
+                    )
+                    if attempt_index:
+                        LOGGER.info(
+                            "Shared survey frame emission recovered with cap=%d after %d failed graph attempt(s)",
+                            cap,
+                            attempt_index,
+                        )
+                    last_emission_error = None
+                    break
+                except ValidationFailure as exc:
+                    last_emission_error = exc
+                    detail = str(exc).casefold()
+                    retryable = any(
+                        marker in detail
+                        for marker in (
+                            "cannot allocate memory",
+                            "error initializing filters",
+                            "error initializing filter",
+                        )
+                    )
+                    if not retryable or attempt_index == len(attempt_caps) - 1:
+                        raise
+            if last_emission_error is not None:
+                raise last_emission_error
+            # The frame-emission detector intentionally exposes every raw
+            # adaptive sample so its timing stream can be audited. Those raw
+            # samples are not the canonical candidate policy: the established
+            # survey path applies the adaptive thresholds/clustering rules
+            # that reduce motion noise to protected state changes. Re-run that
+            # inexpensive candidate-only pass and use it as the authority;
+            # the combined pass contributes pixels only. Falling back to the
+            # raw adaptive stream here would turn a 312-frame reconstruction
+            # into 1,000+ frames on ordinary presenter motion.
+            structural_candidates = survey_video_candidates(
                 source,
-                frame_output_dir,
-                emitted_periodic_times,
+                duration_ms=duration_ms,
+                interval_seconds=interval_seconds,
+                strict=strict,
+                scene_detection=scene_detection,
+                adaptive_detection=adaptive_detection,
                 ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                 ffmpeg_bin=ffmpeg_path,
-            )
-            structural_candidates = merge_survey_candidates(
-                (
-                    periodic_candidates(
-                        duration_ms,
-                        interval_seconds=interval_seconds,
-                        strict=strict,
-                    ),
-                    hard,
-                    adaptive,
-                )
+                speech_reference_times_ms=(),
             )
             candidates = merge_survey_candidates(
                 (

@@ -17,6 +17,11 @@ intent.
 - Long-running native ASR chunks now emit owner-local progress heartbeats so a
   blocked decoder is distinguishable from a dead process; heartbeats never
   imply chunk completion or alter transcript output.
+- The overlapped visual survey now retries bounded periodic-frame filter graphs
+  when a platform FFmpeg allocator rejects a large expression. The retry keeps
+  exact hard/periodic pixels as acceleration receipts while the established
+  candidate-only survey remains authoritative for adaptive sampling, so
+  fallback extraction and canonical output stay unchanged.
 
 ## [0.2.0] - 2026-08-20
 
