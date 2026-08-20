@@ -63,14 +63,22 @@ def test_review_bundle_aliases_and_entrypoints_are_documented() -> None:
         assert entrypoint in cli_reference
 
 
-def test_public_docs_keep_python_imports_provisional() -> None:
+def test_public_docs_describe_the_stable_python_facade() -> None:
     contract = CONTRACT.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
 
-    assert "## Python API (provisional)" in readme
+    assert "## Python API (stable)" in readme
     assert "docs/public-contracts.md" in readme
-    assert "video_script_reconstructor.pipeline.run_pipeline" in contract
-    assert "**provisional**" in contract
+    for function in (
+        "video_script_reconstructor.api.plan",
+        "video_script_reconstructor.api.run",
+        "video_script_reconstructor.api.validate",
+        "video_script_reconstructor.api.list_review_items",
+        "video_script_reconstructor.api.show_review_item",
+    ):
+        assert function in contract
+    assert "pipeline.run_pipeline" not in contract
+    assert "mutation-heavy review apply/finalize" in contract
 
 
 def test_result_and_schema_contracts_are_present() -> None:

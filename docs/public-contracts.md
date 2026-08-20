@@ -104,23 +104,30 @@ The project status values are:
 
 ## Python imports
 
-Stable Python surface today:
+Stable Python surface:
 
 - `video_script_reconstructor.__version__`
 - `long_video_analyzer.__version__`
+- `video_script_reconstructor.api.plan`
+- `video_script_reconstructor.api.run`
+- `video_script_reconstructor.api.validate`
+- `video_script_reconstructor.api.list_review_items`
+- `video_script_reconstructor.api.show_review_item`
+- the typed result models exported by `video_script_reconstructor.api`
 
-There is no stable high-level Python execution facade yet. The following paths
-are **provisional** because they are documented for local use but are module
-internals rather than a versioned API:
+The API is synchronous and offline by default. It returns immutable snapshots,
+preserves the CLI status/exit-code vocabulary, and raises the documented
+package exceptions for operations that cannot produce a trustworthy result.
+Its first stable slice intentionally excludes provider injection, progress
+callbacks, batch orchestration, and mutation-heavy review apply/finalize
+operations. See the [Python API reference](python-api.md) for signatures and
+the compatibility policy.
 
-- `video_script_reconstructor.pipeline.run_pipeline`
-- `video_script_reconstructor.validate_output.validate_project`
-- `video_script_reconstructor.cli.main`
-
-All other package modules, classes, helper functions, cache files, and provider
-implementations are internal. The CLI is the compatibility surface until a
-small typed API is deliberately designed and tested. Documentation must label
-provisional imports instead of presenting them as stable library APIs.
+`video_script_reconstructor.pipeline`,
+`video_script_reconstructor.validate_output`, `video_script_reconstructor.review`,
+`video_script_reconstructor.cli`, all other package modules, helper functions,
+cache files, and provider implementations are internal. Do not import them or
+parse generated `.state` files as integration contracts.
 
 ## Schemas and generated output
 
