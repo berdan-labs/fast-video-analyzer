@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
 import sys
@@ -47,6 +48,7 @@ REQUIRED_FILES = (
     "docs/public-contracts.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
+    "docs/performance-benchmarking.md",
     "docs/pypi-trusted-publishing.md",
     "docs/releasing.md",
     "docs/runbooks.md",
@@ -54,9 +56,11 @@ REQUIRED_FILES = (
     "scripts/evaluate_corpus.py",
     "scripts/run_model_audit.py",
     "scripts/validate_corpus_manifest.py",
+    "scripts/validate_performance_manifest.py",
     "tests/corpus_baseline.json",
     "tests/corpus_manifest.json",
     "tests/model_audit_manifest.json",
+    "tests/performance_manifest.json",
     ".python-version",
 )
 
@@ -184,6 +188,25 @@ def check_model_audit_manifest() -> list[str]:
     return errors
 
 
+def check_performance_manifest() -> list[str]:
+    """Keep the public performance workload matrix valid and corpus-bound."""
+
+    path = ROOT / "tests" / "performance_manifest.json"
+    validator_path = ROOT / "scripts" / "validate_performance_manifest.py"
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "vsr_performance_manifest_validator", validator_path
+        )
+        if spec is None or spec.loader is None:
+            return ["unable to load performance manifest validator"]
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        errors = module.load_and_validate_manifest(path, repo_root=ROOT)
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        return [f"unable to validate performance manifest: {exc}"]
+    return [f"performance manifest: {error}" for error in errors]
+
+
 def _workflow_uses(value: Any) -> list[str]:
     """Collect parsed workflow ``uses`` values without inspecting shell text."""
 
@@ -294,6 +317,7 @@ def main() -> int:
     failures.extend(check_manifest())
     failures.extend(check_corpus_baseline())
     failures.extend(check_model_audit_manifest())
+    failures.extend(check_performance_manifest())
     failures.extend(check_workflow_actions())
     failures.extend(check_release_contract())
     failures.extend(check_pypi_setup_documentation())

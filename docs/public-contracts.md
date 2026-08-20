@@ -135,6 +135,9 @@ provisional imports instead of presenting them as stable library APIs.
 - `tests/corpus_baseline.json` is the scoring baseline for the checked-in seed;
   host-dependent timings are intentionally absent until a compatible machine
   baseline is recorded.
+- `tests/performance_manifest.json` freezes owner-local CPU, CUDA, storage,
+  cold, warm/resume, validation, and batch workload definitions plus relative
+  regression budgets; host timings and raw reports remain outside Git.
 - `tests/model_audit_manifest.json` maps every model-dependent acceptance lane
   to its test module and model identity. The owner-controlled audit script
   produces release evidence from it; its raw output is not a repository

@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "manifest_id": "fast-video-analyzer-performance-matrix",
+  "description": "Public workload definitions and relative budgets for owner-local performance runs.",
+  "corpus_manifest": "tests/corpus_manifest.json",
+  "baseline_policy": {
+    "comparison_unit": "same workload, hardware profile, model revision, and runtime family",
+    "max_wall_time_regression_fraction": 0.1,
+    "max_peak_rss_regression_fraction": 0.15,
+    "max_output_bytes_regression_fraction": 0.1,
+    "quality_gate_required": true,
+    "host_baselines_belong_in_owner_local_storage": true
+  },
+  "profiles": [
+    {
+      "id": "cpu-standard",
+      "hardware_class": "cpu",
+      "required_capabilities": ["ffmpeg"],
+      "notes": "Portable CPU profile for deterministic subtitle-led and visual-stage comparisons."
+    },
+    {
+      "id": "cuda-midrange",
+      "hardware_class": "cuda",
+      "required_capabilities": ["ffmpeg", "cuda", "faster-whisper-large-v3"],
+      "notes": "Owner-controlled CUDA profile; unavailable hardware is reported, never treated as a pass."
+    },
+    {
+      "id": "storage-constrained",
+      "hardware_class": "storage-constrained",
+      "required_capabilities": ["ffmpeg"],
+      "notes": "Owner-controlled profile with an explicitly limited output/cache volume and reserve."
+    }
+  ],
+  "workloads": [
+    {
+      "id": "short-subtitle-led",
+      "case_id": "generated-caption-variants",
+      "expected_quality_case": "generated-caption-variants",
+      "input_mode": "subtitle-led",
+      "profile_ids": ["cpu-standard", "cuda-midrange", "storage-constrained"],
+      "preset": "strict",
+      "vision_mode": "none",
+      "scenarios": [
+        {
+          "id": "cold",
+          "runner": "benchmark_pipeline",
+          "mode": "cold",
+          "repeat": 3,
+          "resume": false,
+          "independent_validation": false
+        },
+        {
+          "id": "warm-resume",
+          "runner": "benchmark_pipeline",
+          "mode": "warm",
+          "repeat": 3,
+          "resume": true,
+          "independent_validation": false
+        },
+        {
+          "id": "independent-validation",
+          "runner": "benchmark_pipeline",
+          "mode": "validation",
+          "repeat": 1,
+          "resume": true,
+          "independent_validation": true
+        },
+        {
+          "id": "batch",
+          "runner": "batch_cli",
+          "mode": "batch",
+          "repeat": 1,
+          "resume": true,
+          "independent_validation": false,
+          "required_capabilities": ["faster-whisper-large-v3"]
+        }
+      ]
+    },
+    {
+      "id": "short-visual-change",
+      "case_id": "generated-slide-lecture",
+      "expected_quality_case": "generated-slide-lecture",
+      "input_mode": "subtitle-led",
+      "profile_ids": ["cpu-standard", "cuda-midrange", "storage-constrained"],
+      "preset": "strict",
+      "vision_mode": "none",
+      "scenarios": [
+        {
+          "id": "cold",
+          "runner": "benchmark_pipeline",
+          "mode": "cold",
+          "repeat": 3,
+          "resume": false,
+          "independent_validation": false
+        },
+        {
+          "id": "warm-resume",
+          "runner": "benchmark_pipeline",
+          "mode": "warm",
+          "repeat": 3,
+          "resume": true,
+          "independent_validation": false
+        },
+        {
+          "id": "independent-validation",
+          "runner": "benchmark_pipeline",
+          "mode": "validation",
+          "repeat": 1,
+          "resume": true,
+          "independent_validation": true
+        },
+        {
+          "id": "batch",
+          "runner": "batch_cli",
+          "mode": "batch",
+          "repeat": 1,
+          "resume": true,
+          "independent_validation": false,
+          "required_capabilities": ["faster-whisper-large-v3"]
+        }
+      ]
+    }
+  ]
+}
