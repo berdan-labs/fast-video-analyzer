@@ -38,8 +38,11 @@ Last reviewed: 2026-08-20
   work makes their maintenance value exceed their overhead.
 - [x] Add a non-secret backup export, integrity verification, and restore-drill
   procedure.
-- [x] Add an evidence-first owner-operations prompt that encodes the
-  single-administrator policy, safe mutation boundaries, and completion audit.
+- [x] Define an evidence-first owner-operations procedure that encodes the
+  single-administrator policy, safe mutation boundaries, and completion audit;
+  detailed agent prompt remains owner-local.
+- [x] Separate durable public repository truth from owner-local planning,
+  private triage, raw evaluation output, and machine-specific working files.
 
 ## Owner decisions and external setup
 

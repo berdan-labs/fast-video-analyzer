@@ -29,6 +29,25 @@ Keep generated reports, benchmark roots, model weights, and local logs outside
 the repository. Tests should use `tmp_path` or the maintained fixtures under
 `tests/fixtures/generated`.
 
+## Repository artifact discipline
+
+Commit durable, reviewable project truth: source, tests, small reproducible
+fixtures, CI and packaging configuration, supported user documentation,
+versioned schemas, security policy, runbooks, and decisions that contributors
+need in order to use or change the product.
+
+Keep owner-local or external: active development plans, private triage,
+scratch notes, AI transcripts, raw benchmark output, proprietary media,
+model weights, machine-specific paths, temporary logs, credentials, recovery
+codes, and generated project exports. Do not turn a private working note into a
+large documentation dump just because it was produced by a tool.
+
+When a local note becomes useful to others, distill it into the smallest
+maintainable artifact—a focused issue, pull request, ADR, contract, runbook,
+test, changelog entry, or concise roadmap item—with evidence, ownership, and a
+reason it should remain true. A human owner decides that promotion during
+review.
+
 ## Pull requests
 
 Describe user-visible behavior, include a focused regression test, and call out
