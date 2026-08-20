@@ -130,7 +130,13 @@ All three entrypoints invoke the same parser and implementation. Nested
 compatibility aliases such as `review bundle batch-create` and
 `review bundle create-batch` are covered by the CLI compatibility tests.
 
-## Python API
+## Python API (provisional)
+
+The CLI is the compatibility surface today; there is not yet a stable,
+versioned high-level Python API. The import below is useful for local tooling
+but is provisional and may change in a minor release. See the
+[public contract inventory](docs/public-contracts.md) before building an
+integration around Python imports.
 
 ```python
 from pathlib import Path
