@@ -62,6 +62,14 @@ fast-video-analyzer --version
 fast-video-analyzer doctor --offline
 ```
 
+For a concise operator view without machine-specific paths, add `--summary`.
+The default command remains the full diagnostic JSON for support and
+troubleshooting:
+
+```bash
+fast-video-analyzer doctor --offline --summary
+```
+
 Create a support bundle when asking for help. It contains sanitized capability
 metadata only; it does not copy source media, transcripts, screenshots,
 generated projects, credentials, or filesystem paths:
@@ -182,6 +190,15 @@ Verify output integrity against timeline rules and image pixel hashes:
 ```bash
 fast-video-analyzer validate "path/to/video (Analyzer Outputs)"
 fast-video-analyzer review list "path/to/video (Analyzer Outputs)"
+```
+
+Before a first run, `plan --summary` prints the selected workflow, estimated
+evidence/storage, prerequisites, and copyable run/validate commands without
+processing the media:
+
+```bash
+fast-video-analyzer plan "path/to/video.mp4" \
+  --subtitle "path/to/video.srt" --offline --summary
 ```
 
 If the run returns `review_required` (exit code `3`), continue with the

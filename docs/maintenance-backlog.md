@@ -65,6 +65,8 @@ Last reviewed: 2026-08-20
 - [x] Add a documented backup export and quarterly restore drill.
 - [x] Measure and document the no-copy review handoff from `review_required` to
   attributable final sign-off; keep the owner-local timing evidence outside Git.
+- [x] Add opt-in path-free `doctor --summary` and copyable `plan --summary`
+  output after measuring first-run setup friction.
 
 ## Recurring cadence
 

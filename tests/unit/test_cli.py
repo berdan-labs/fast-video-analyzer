@@ -7,7 +7,11 @@ import video_script_reconstructor.cli as cli
 import video_script_reconstructor.pipeline as pipeline
 import video_script_reconstructor.subagent_review as subagent_review
 import video_script_reconstructor.validate_output as validate_output
-from video_script_reconstructor.cli import _compact_semantic_batch_result
+from video_script_reconstructor.cli import (
+    _compact_doctor_report,
+    _compact_plan,
+    _compact_semantic_batch_result,
+)
 from video_script_reconstructor.validate_output import ValidationResult
 
 
@@ -58,6 +62,76 @@ def test_compact_semantic_batch_result_preserves_non_summary_projects() -> None:
     assert result["projects"][0]["status"] == "skipped"
     assert result["projects"][1] == "not-a-project-record"
     assert result["output_mode"] == "compact"
+
+
+def test_compact_doctor_report_is_path_free_and_actionable() -> None:
+    checks = {
+        name: {"status": "available"}
+        for name in (
+            "python",
+            "ffmpeg",
+            "ffprobe",
+            "package_import",
+            "package_data",
+            "image_metadata",
+            "disk",
+            "output_write",
+            "network_policy",
+            "ocr",
+            "vision_provider",
+        )
+    }
+    checks["speech_recognition"] = {"status": "optional"}
+    summary = _compact_doctor_report({"schema_version": "1.0", "checks": checks})
+
+    assert summary["output_mode"] == "summary"
+    assert summary["status"] == "ready"
+    assert summary["blocking_checks"] == []
+    assert summary["optional_capabilities"] == ["speech_recognition"]
+    assert any("plan <input>" in item for item in summary["next_actions"])
+    assert "path" not in json.dumps(summary)
+
+    checks["ffmpeg"] = {"status": "blocking-for-strict", "fix": "Install FFmpeg."}
+    blocked = _compact_doctor_report({"schema_version": "1.0", "checks": checks})
+    assert blocked["status"] == "blocked"
+    assert blocked["blocking_checks"] == ["ffmpeg"]
+    assert blocked["next_actions"][0] == "Fix ffmpeg: Install FFmpeg."
+
+
+def test_compact_plan_emits_copyable_run_and_validation_actions() -> None:
+    summary = _compact_plan(
+        {
+            "schema_version": "1.0",
+            "input_classification": "video",
+            "asr_expected": False,
+            "ocr_expected": True,
+            "visual_review_expected": True,
+            "estimated_evidence_images": 2,
+            "estimated_disk_bytes": 1234,
+            "output_path": "C:/outputs/demo",
+            "output_contract": "one Markdown report",
+            "network_actions_requiring_permission": [],
+            "no_full_processing_statement": "No full processing.",
+        },
+        input_value="demo.mp4",
+        subtitles=[Path("demo.srt")],
+        transcript=None,
+        output_root=Path("outputs"),
+        preset="strict",
+        vision_mode="host-agent",
+    )
+
+    assert summary["output_mode"] == "summary"
+    assert summary["workflow"] == "subtitle-led"
+    assert summary["next_actions"][0].startswith("Subtitle-led workflow")
+    assert 'fast-video-analyzer run "demo.mp4" --subtitle "demo.srt"' in summary["next_actions"][1]
+    assert 'fast-video-analyzer validate "C:/outputs/demo"' in summary["next_actions"][2]
+    assert any("review_required" in item for item in summary["next_actions"])
+
+
+def test_doctor_and_plan_parsers_expose_opt_in_summary() -> None:
+    assert cli._parser().parse_args(["doctor", "--summary"]).summary is True
+    assert cli._parser().parse_args(["plan", "demo.mp4", "--summary"]).summary is True
 
 
 def test_review_bundle_create_all_parser_exposes_storage_and_budget_controls() -> None:
