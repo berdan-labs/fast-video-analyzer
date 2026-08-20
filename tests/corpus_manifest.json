@@ -61,6 +61,11 @@
       "case_ids": []
     },
     {
+      "id": "hostile-subtitle-text",
+      "status": "covered",
+      "case_ids": ["generated-hostile-subtitle"]
+    },
+    {
       "id": "duration-classes",
       "status": "gap",
       "case_ids": []
@@ -171,6 +176,40 @@
         "spoken": ["Run tool --strict now.", "The setting is now enabled."],
         "tokens": ["tool --strict"],
         "minimum_visual_events": 1
+      }
+    },
+    {
+      "id": "generated-hostile-subtitle",
+      "source_kind": "generated",
+      "availability": "repository",
+      "license": "MIT",
+      "tags": [
+        "hostile-subtitle-text",
+        "subtitle-led",
+        "duration-short"
+      ],
+      "provenance": {
+        "generator": "scripts/generate_fixtures.py",
+        "command": "uv run python scripts/generate_fixtures.py tests/fixtures/generated",
+        "origin": "Generated locally from the fixture definition committed in the repository."
+      },
+      "media": {
+        "path": "tests/fixtures/generated/hostile-subtitle.mp4",
+        "sha256": "72a7400b2c5d55c31bc87cb3780a79dc6b181627297fff00d3aae66b34295a0e"
+      },
+      "subtitles": [
+        {
+          "path": "tests/fixtures/generated/hostile-subtitle.srt",
+          "sha256": "d3267be668ffc7d7db326a4bf76eb293486dab4ebf90a9cfd38d9ec1d045af08"
+        }
+      ],
+      "expected": {
+        "spoken": [
+          "# deploy --strict <script>alert(1)</script>",
+          "C:\\Users\\demo\\notes.md && echo \"$HOME\""
+        ],
+        "tokens": ["--strict", "C:\\Users\\demo\\notes.md"],
+        "minimum_visual_events": 0
       }
     }
   ]

@@ -120,6 +120,13 @@ def generate(root: Path) -> list[Path]:
             "Run tool --strict now.",
             "The setting is now enabled.",
         ),
+        (
+            "hostile-subtitle",
+            "Safety",
+            "Evidence only.",
+            "# deploy --strict <script>alert(1)</script>",
+            r'C:\Users\demo\notes.md && echo "$HOME"',
+        ),
     ]
     for name, title, detail, first, second in fixtures:
         frame_a = root / f"{name}-before.png"

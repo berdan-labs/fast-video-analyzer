@@ -53,15 +53,17 @@ in an owner-local manifest beside the development plan.
 
 ## Current seed and honest gaps
 
-The three checked-in generated cases cover clean English speech, a sparse
-talking head, a slide lecture, and a screen tutorial with visible state change.
-The manifest marks Filipino/code-switching, overlapping speakers, audio-only
-and transcript-only inputs, subtitle/caption variants, hostile text, media
-pathologies, long durations, and visual-only inputs as `gap`. Those entries are
-deliberate collection work, not claims that the current seed already measures
-them. The evaluator will produce scored quality and performance reports for
-new cases once they have licensed or owner-controlled sources; the seed
-evaluator already runs these three cases in ordinary CI.
+The checked-in generated cases cover clean English speech, a sparse talking
+head, a slide lecture, a screen tutorial with visible state change, and a
+hostile subtitle-text case containing Markdown, HTML, a filesystem-looking
+path, and a shell-like command. The manifest still marks Filipino/code-
+switching, overlapping speakers, audio-only and transcript-only inputs,
+subtitle/caption variants, hostile OCR text, media pathologies, long durations,
+and visual-only inputs as `gap`. Those entries are deliberate collection work,
+not claims that the current seed already measures them. The evaluator will
+produce scored quality and performance reports for new cases once they have
+licensed or owner-controlled sources; the deterministic seed evaluator runs
+all current cases in ordinary CI.
 
 When a fixture changes, regenerate it intentionally, update its hash and
 expected assertions, and run the validator in the same pull request. Do not
