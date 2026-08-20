@@ -43,6 +43,7 @@ REQUIRED_FILES = (
     "docs/cli-reference.md",
     "docs/github-operations.md",
     "docs/maintenance-backlog.md",
+    "docs/owner-operations-prompt.md",
     "docs/pypi-trusted-publishing.md",
     "docs/releasing.md",
     "docs/runbooks.md",
