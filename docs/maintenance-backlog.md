@@ -63,6 +63,8 @@ Last reviewed: 2026-08-20
 ## Planned engineering follow-ups
 
 - [x] Add a documented backup export and quarterly restore drill.
+- [x] Measure and document the no-copy review handoff from `review_required` to
+  attributable final sign-off; keep the owner-local timing evidence outside Git.
 
 ## Recurring cadence
 
