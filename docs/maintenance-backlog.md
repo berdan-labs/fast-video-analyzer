@@ -57,12 +57,12 @@ Last reviewed: 2026-08-20
   sanitized model-audit evidence and SBOM to GitHub Releases, verify release
   attestations, and complete a clean PyPI install/dogfood journey (workflow
   `32371441983`).
-- [x] Create the first off-GitHub mirror in the verified EFS-encrypted
-  `E:\Encrypted-Backups\fast-video-analyzer` destination and record a
-  successful restore drill for main commit `3d3bc4c`.
-- [ ] Export and retain an EFS recovery certificate in a separately protected,
-  owner-controlled location; Windows currently reports no recovery
-  certificate.
+- [x] Create and verify an off-GitHub encrypted mirror and a successful fresh
+  restore drill; exact locations, timestamps, commits, and filesystem details
+  remain in owner-local continuity records rather than this public backlog.
+- [ ] Export and retain the current EFS certificate/key, or deliberately
+  configure and test a recovery-agent certificate, in a separately protected
+  owner-controlled location. Never place recovery material in Git.
 
 ## Planned engineering follow-ups
 

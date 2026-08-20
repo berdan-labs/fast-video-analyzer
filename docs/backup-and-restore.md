@@ -67,23 +67,18 @@ environments, secrets, webhook/App integrations, and the PyPI Trusted Publisher
 only after reviewing the snapshot. Rotate any credentials involved in the
 incident instead of restoring them from an old location.
 
-## Current backup record
+## Verification record boundary
 
-On 2026-08-20, the first off-GitHub mirror was created at:
+The public repository contains the repeatable backup and restore procedure, not
+the owner's operational diary. Exact backup locations, timestamps, machine
+paths, filesystem-encryption details, restore logs, and recovery-certificate
+status belong in owner-local records or protected storage outside Git. This
+keeps the runbook useful to another maintainer without publishing private host
+layout or stale instance evidence.
 
-```text
-E:\Encrypted-Backups\fast-video-analyzer\berdan-labs-fast-video-analyzer-20260820T070202Z
-```
-
-The parent directory is EFS-encrypted with AES-256; a new-file inheritance
-sentinel and representative backup files were verified with `cipher /c`. The
-backup helper's checksum verification passed and recorded main commit
-`3d3bc4c0d792eaff0c561f03c564ae889af180be`. A fresh restore outside the backup
-directory completed with `--run-contract`, including the repository maintenance
-verifier, and the temporary restore checkout was then removed.
-
-Windows currently reports **no EFS recovery certificate**. Before relying on
-this location for machine-loss recovery, the owner must export and retain the
-EFS recovery certificate in a separately protected owner-controlled location.
-Do not place that certificate or any private key in the repository or backup
-mirror.
+After each material backup or restore drill, the owner should record locally the
+selected immutable commit, checksum result, restored commit, verifier result,
+and any manual recovery gaps. Before relying on a location for machine-loss
+recovery, separately verify custody of the EFS certificate/key material. Never
+place that certificate, a private key, its password, or recovery codes in the
+repository or the public backup.
