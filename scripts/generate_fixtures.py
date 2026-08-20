@@ -127,7 +127,19 @@ def generate(root: Path) -> list[Path]:
     root.mkdir(parents=True, exist_ok=True)
     audio = root / "fixture.wav"
     _wave(audio, 4.0)
-    outputs: list[Path] = []
+    audio_only = root / "audio-only.wav"
+    shutil.copyfile(audio, audio_only)
+    _write_srt(
+        root / "audio-only.srt",
+        "This audio-only fixture is complete.",
+        "The source has no video frames.",
+    )
+    _write_srt(
+        root / "transcript-only.srt",
+        "This transcript-only fixture is complete.",
+        "No media is required.",
+    )
+    outputs: list[Path] = [audio_only, root / "audio-only.srt", root / "transcript-only.srt"]
     fixtures = [
         (
             "talking-head",

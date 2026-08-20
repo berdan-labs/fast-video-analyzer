@@ -6,7 +6,11 @@ intent.
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- Deterministic corpus coverage for standalone audio with a subtitle sidecar
+  and transcript-only SRT input. These cases validate modality routing and
+  parsing; they do not claim real-model accuracy.
 
 ## [0.2.0] - 2026-08-20
 
