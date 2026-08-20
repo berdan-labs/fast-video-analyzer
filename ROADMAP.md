@@ -30,6 +30,9 @@ The repository operating checklist lives in
   alignment, and semantic-review capabilities before a minor release.
 - Keep the audit lane map and sanitized report format reproducible while
   retaining model weights, source media, and raw reports outside Git.
+- Keep the public performance matrix and relative regression budgets current;
+  store host-specific baselines and raw reports in the owner-controlled
+  performance directory.
 
 ## Next
 

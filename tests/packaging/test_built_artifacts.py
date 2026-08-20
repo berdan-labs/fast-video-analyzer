@@ -30,6 +30,7 @@ def test_sdist_contains_validator_and_source_contract(installed_wheel: Installed
         "scripts/evaluate_corpus.py",
         "scripts/run_model_audit.py",
         "scripts/validate_corpus_manifest.py",
+        "scripts/validate_performance_manifest.py",
         "configs/strict.yaml",
         "configs/schema.json",
         "src/video_script_reconstructor/validate_output.py",
@@ -37,6 +38,7 @@ def test_sdist_contains_validator_and_source_contract(installed_wheel: Installed
         "tests/corpus_baseline.json",
         "tests/corpus_manifest.json",
         "tests/model_audit_manifest.json",
+        "tests/performance_manifest.json",
         "SKILL.md",
     }
     assert required <= names
