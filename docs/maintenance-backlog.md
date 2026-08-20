@@ -47,9 +47,9 @@ Last reviewed: 2026-08-20
   PyPI now shows the exact `berdan-labs` / `fast-video-analyzer` / `release.yml`
   / `pypi` entry, and GitHub's branch-restricted environment and OIDC workflow
   are ready.
-- [ ] Publish the first tagged release through the pending publisher, then
+- [x] Publish the first tagged release through the pending publisher, then
   verify the active PyPI publisher, package page, clean installation, and
-  release URL.
+  release URL (`v0.1.0`, GitHub Actions run `32341261708`).
 - [ ] Choose encrypted external backup storage, create the first off-GitHub
   mirror, and record a successful restore drill.
 
