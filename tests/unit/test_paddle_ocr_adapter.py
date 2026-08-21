@@ -78,6 +78,33 @@ def test_paddle_ocr_available_requires_both_verified_models(
     assert adapter.available() is False
 
 
+def test_paddle_ocr_spawn_worker_copies_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("video_script_reconstructor.paddle_ocr_adapter.verify_model", _verified)
+    adapter = PaddleOCRV5Adapter(
+        worker_python=sys.executable,
+        model_root="C:/models",
+        detector_name="detector",
+        recognizer_name="recognizer",
+        device="gpu:0",
+        uncertainty_threshold=0.73,
+        timeout_seconds=17.0,
+    )
+
+    child = adapter.spawn_worker()
+
+    assert child is not adapter
+    assert child.worker_python == adapter.worker_python
+    assert child.model_root == adapter.model_root
+    assert child.detector_name == adapter.detector_name
+    assert child.recognizer_name == adapter.recognizer_name
+    assert child.device == adapter.device
+    assert child.uncertainty_threshold == adapter.uncertainty_threshold
+    assert child.timeout_seconds == adapter.timeout_seconds
+    assert child.cache_identity == adapter.cache_identity
+
+
 def test_persistent_worker_reuses_loaded_engine_across_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

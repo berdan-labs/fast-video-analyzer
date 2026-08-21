@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -563,6 +563,7 @@ def _extract_frames_batched(
     timeout_seconds: float,
     max_workers: int,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[ExtractedFrame], None] | None = None,
 ) -> tuple[ExtractedFrame, ...]:
     groups = _batch_request_groups(requested_times_ms)
     group_offsets: list[tuple[int, tuple[int, ...]]] = []
@@ -609,6 +610,8 @@ def _extract_frames_batched(
         ) as pool:
             for group_offset, extracted in pool.map(extract_single, exact_offsets):
                 singleton_results[group_offset] = extracted
+                if on_frame is not None:
+                    on_frame(extracted)
 
     extracted_by_offset: dict[int, ExtractedFrame] = dict(singleton_results)
     # Batch groups have disjoint temporary/output names and independent FFmpeg
@@ -667,6 +670,9 @@ def _extract_frames_batched(
                 extracted_by_offset.update(
                     {group_offset + position: frame for position, frame in enumerate(batch)}
                 )
+                if on_frame is not None:
+                    for frame in batch:
+                        on_frame(frame)
     if batch_fallback_offsets:
         with _executor_context(
             worker_pool,
@@ -675,6 +681,8 @@ def _extract_frames_batched(
         ) as pool:
             for offset, extracted in pool.map(extract_single, batch_fallback_offsets):
                 extracted_by_offset[offset] = extracted
+                if on_frame is not None:
+                    on_frame(extracted)
     return tuple(extracted_by_offset[position] for position in range(len(requested_times_ms)))
 
 
@@ -690,6 +698,7 @@ def extract_frames(
     ffmpeg_threads: int | None = None,
     timeout_seconds: float = 120.0,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[ExtractedFrame], None] | None = None,
 ) -> tuple[ExtractedFrame, ...]:
     if len(set(requested_times_ms)) != len(requested_times_ms):
         raise InputError("requested frame times must be unique")
@@ -726,6 +735,7 @@ def extract_frames(
                 timeout_seconds=max(timeout_seconds, 600.0),
                 max_workers=max_workers,
                 worker_pool=worker_pool,
+                on_frame=on_frame,
             )
         except ValidationFailure:
             # A low-frame-rate/VFR stream can still reject an exact fallback
@@ -761,13 +771,21 @@ def extract_frames(
     # smallest possible resource footprint.
     indexed = list(enumerate(ordered_times))
     if max_workers == 1 or len(indexed) < 2:
-        return tuple(extract_one(item) for item in indexed)
+        extracted = tuple(extract_one(item) for item in indexed)
+        if on_frame is not None:
+            for frame in extracted:
+                on_frame(frame)
+        return extracted
     with _executor_context(
         worker_pool,
         max_workers=max_workers,
         thread_name_prefix="vsr-frame",
     ) as pool:
-        return tuple(pool.map(extract_one, indexed))
+        extracted = tuple(pool.map(extract_one, indexed))
+    if on_frame is not None:
+        for frame in extracted:
+            on_frame(frame)
+    return extracted
 
 
 def to_frame_observation(

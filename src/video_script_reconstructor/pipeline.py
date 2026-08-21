@@ -9,14 +9,16 @@ import logging
 import math
 import os
 import platform
+import queue
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import datetime, timezone
@@ -631,6 +633,7 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "ocr_workers": _ocr_workers(),
             "ocr_checkpoint_batch": _ocr_checkpoint_flush_interval(),
             "ocr_batch_size": _ocr_batch_size(),
+            "paddle_ocr_workers": _paddle_ocr_batch_workers(),
             "asr_cpu_threads": _asr_cpu_threads(),
             "asr_num_workers": _faster_whisper_num_workers(),
             "validator_metadata_workers": _metadata_verify_workers(),
@@ -641,6 +644,7 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "VSR_CROP_PREP_WORKERS, "
             "VSR_SURVEY_FFMPEG_THREADS, VSR_OCR_WORKERS, VSR_OCR_CHECKPOINT_BATCH, "
             "VSR_OCR_BATCH_SIZE, "
+            "VSR_PADDLE_OCR_WORKERS, "
             "VSR_ASR_CPU_THREADS, VSR_FASTER_WHISPER_NUM_WORKERS, or "
             "VSR_VALIDATOR_METADATA_WORKERS "
             "only after a representative offline benchmark."
@@ -2925,6 +2929,37 @@ def _ocr_batch_size() -> int:
         return default_size
 
 
+def _paddle_ocr_batch_workers(adapter: Any | None = None) -> int:
+    """Return the bounded opt-in fan-out for persistent Paddle OCR batches.
+
+    A Paddle adapter owns a stateful isolated worker, so concurrent requests
+    require independent ``spawn_worker`` instances.  Keep the default at one
+    process for predictable memory use and make the measured two-worker path
+    explicit.  Adapters without the factory retain the sequential path.
+    """
+
+    raw = os.environ.get("VSR_PADDLE_OCR_WORKERS", "").strip()
+    if not raw:
+        return 1
+    try:
+        requested = max(1, min(2, int(raw)))
+    except ValueError:
+        LOGGER.warning("Ignoring invalid VSR_PADDLE_OCR_WORKERS=%r", raw)
+        return 1
+    if requested <= 1 or adapter is None:
+        return requested
+    if not callable(getattr(adapter, "recognize_many", None)) or not callable(
+        getattr(adapter, "spawn_worker", None)
+    ):
+        LOGGER.warning(
+            "VSR_PADDLE_OCR_WORKERS=%d requested but the OCR adapter has no "
+            "independent worker factory; using one batch worker",
+            requested,
+        )
+        return 1
+    return requested
+
+
 def _ocr_shared_cache_limit() -> int:
     """Return the total shared OCR-cache budget in bytes."""
 
@@ -3184,6 +3219,246 @@ def _write_ocr_cache(
     return True
 
 
+class _StreamingOCRPrefetch:
+    """Consume finalized frame callbacks through bounded OCR workers.
+
+    Frame extraction and OCR are independent after a PNG has been atomically
+    materialized.  This queue keeps that overlap bounded and preserves a safe
+    fallback: if an optional worker fails, the canonical OCR pass reruns any
+    missing frame through the normal adapter path.  Fan-out is capped at one
+    in-flight batch per independent adapter, so it cannot create an unbounded
+    process or memory pool.  The class is intentionally private; it is an
+    acceleration layer, not a new evidence contract.
+    """
+
+    def __init__(self, adapter: Any, *, batch_size: int, worker_count: int = 1) -> None:
+        recognize_many = getattr(adapter, "recognize_many", None)
+        if not callable(recognize_many):
+            raise InputError("streaming OCR prefetch requires a batch-capable adapter")
+        self.adapter = adapter
+        self.batch_size = max(1, int(batch_size))
+        self.worker_count = max(1, min(2, int(worker_count)))
+        self._workers: list[Any] = [adapter]
+        self._owned_workers: list[Any] = []
+        if self.worker_count > 1:
+            spawn_worker = getattr(adapter, "spawn_worker", None)
+            try:
+                if not callable(spawn_worker):
+                    raise InputError("OCR adapter cannot create an independent worker")
+                for _ in range(self.worker_count - 1):
+                    worker = spawn_worker()
+                    if worker is adapter or not callable(getattr(worker, "recognize_many", None)):
+                        raise InputError("OCR adapter returned an invalid independent worker")
+                    available = getattr(worker, "available", None)
+                    if callable(available) and not available():
+                        raise InputError("OCR independent worker is unavailable")
+                    self._workers.append(worker)
+                    self._owned_workers.append(worker)
+            except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+                for worker in self._owned_workers:
+                    close = getattr(worker, "close", None)
+                    if callable(close):
+                        close()
+                self._workers = [adapter]
+                self._owned_workers = []
+                self.worker_count = 1
+                LOGGER.warning(
+                    "OCR worker fan-out unavailable; falling back to one worker: %s", exc
+                )
+        self._queue: queue.Queue[Any | None] = queue.Queue(maxsize=self.batch_size * 2)
+        self._observations: dict[str, Any] = {}
+        self._error: BaseException | None = None
+        self._failed = threading.Event()
+        self._closed = False
+        self._submitted_count = 0
+        self._recognized_count = 0
+        self._batch_count = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name="vsr-streaming-ocr",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def submit(self, frame: Any) -> None:
+        """Queue one stable frame without allowing unbounded pending work."""
+
+        if self._closed or self._failed.is_set():
+            return
+        # A recognizer failure can terminate the worker while the producer is
+        # blocked on a full queue.  Timed puts let the producer observe that
+        # terminal state instead of deadlocking the visual stage.
+        while True:
+            if self._closed or self._failed.is_set():
+                return
+            try:
+                self._queue.put(frame, timeout=0.25)
+            except queue.Full:
+                continue
+            self._submitted_count += 1
+            return
+
+    @staticmethod
+    def _valid_frames(batch: Sequence[Any]) -> list[Any]:
+        return [
+            frame
+            for frame in batch
+            if isinstance(getattr(frame, "frame_id", None), str)
+            and Path(getattr(frame, "path", "")).is_file()
+        ]
+
+    @staticmethod
+    def _observation_id(frame: Any) -> str:
+        frame_id = str(getattr(frame, "frame_id", ""))
+        digits = "".join(character for character in frame_id if character.isdigit())
+        return f"P{int(digits):06d}" if digits else "P000000"
+
+    def _recognize_batch(
+        self, worker_index: int, batch: list[Any]
+    ) -> tuple[list[Any], Mapping[str, Any]]:
+        valid = self._valid_frames(batch)
+        if not valid:
+            return [], {}
+        worker = self._workers[worker_index]
+        results = worker.recognize_many(
+            [Path(frame.path) for frame in valid],
+            frame_ids=[str(frame.frame_id) for frame in valid],
+            observation_ids=[self._observation_id(frame) for frame in valid],
+        )
+        if not isinstance(results, Mapping):
+            raise ValidationFailure("streaming OCR adapter returned a non-mapping result")
+        return valid, results
+
+    def _record_batch(self, valid: list[Any], results: Mapping[str, Any]) -> None:
+        if not valid:
+            return
+        recognized = 0
+        for frame in valid:
+            frame_id = str(frame.frame_id)
+            observation = results.get(frame_id)
+            if observation is not None:
+                self._observations[frame_id] = observation
+                recognized += 1
+        self._recognized_count += recognized
+        self._batch_count += 1
+
+    def _fail(self, exc: BaseException) -> None:
+        if self._error is None:
+            self._error = exc
+        self._failed.set()
+
+    def _flush(self, batch: list[Any]) -> None:
+        if not batch or self._failed.is_set():
+            return
+        try:
+            valid, results = self._recognize_batch(0, batch)
+            self._record_batch(valid, results)
+        except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+            self._fail(exc)
+
+    def _run_fanout(self) -> None:
+        """Dispatch at most one batch per independent adapter at a time."""
+
+        executor = ThreadPoolExecutor(
+            max_workers=self.worker_count,
+            thread_name_prefix="vsr-streaming-ocr-batch",
+        )
+        pending: dict[Future[tuple[list[Any], Mapping[str, Any]]], int] = {}
+        available = list(range(self.worker_count))
+
+        def collect(done: Iterable[Future[tuple[list[Any], Mapping[str, Any]]]]) -> None:
+            for future in done:
+                worker_index = pending.pop(future)
+                try:
+                    valid, results = future.result()
+                    self._record_batch(valid, results)
+                    available.append(worker_index)
+                except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+                    self._fail(exc)
+                    for remaining in pending:
+                        remaining.cancel()
+                    raise
+
+        def dispatch(batch: list[Any]) -> None:
+            if not batch or self._failed.is_set():
+                return
+            while not available and pending and not self._failed.is_set():
+                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                collect(done)
+            if self._failed.is_set() or not available:
+                return
+            worker_index = available.pop(0)
+            future = executor.submit(self._recognize_batch, worker_index, batch)
+            pending[future] = worker_index
+
+        batch: list[Any] = []
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    dispatch(batch)
+                    batch = []
+                    while pending and not self._failed.is_set():
+                        done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                        collect(done)
+                    return
+                batch.append(item)
+                if len(batch) >= self.batch_size:
+                    dispatch(batch)
+                    batch = []
+                    if self._failed.is_set():
+                        return
+        except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+            self._fail(exc)
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _run(self) -> None:
+        if self.worker_count > 1:
+            self._run_fanout()
+            return
+        batch: list[Any] = []
+        while True:
+            item = self._queue.get()
+            if item is None:
+                self._flush(batch)
+                return
+            batch.append(item)
+            if len(batch) >= self.batch_size:
+                self._flush(batch)
+                batch = []
+                if self._failed.is_set():
+                    return
+
+    def finish(self) -> None:
+        """Stop the worker and wait for all successfully queued OCR batches."""
+
+        if self._closed:
+            return
+        self._closed = True
+        if not self._failed.is_set():
+            self._queue.put(None)
+        self._thread.join()
+        for worker in self._owned_workers:
+            close = getattr(worker, "close", None)
+            if callable(close):
+                close()
+
+    @property
+    def observations(self) -> dict[str, Any]:
+        return dict(self._observations)
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {
+            "submitted_count": self._submitted_count,
+            "recognized_count": self._recognized_count,
+            "batch_count": self._batch_count,
+            "worker_count": self.worker_count,
+            "error": str(self._error) if self._error is not None else None,
+        }
+
+
 def _load_or_run_ocr(
     source: Path,
     project_dir: Path,
@@ -3193,6 +3468,8 @@ def _load_or_run_ocr(
     adapter_key: str,
     source_sha256: str | None = None,
     shared_cache_dir: Path | None = None,
+    prefetched_by_frame_id: Mapping[str, Any] | None = None,
+    prefetch_metrics: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Resume completed OCR observations and process only uncached pixels.
 
@@ -3292,10 +3569,27 @@ def _load_or_run_ocr(
             pending.setdefault(frame_key, []).append(index)
 
     representative_indices = [indices[0] for indices in pending.values()]
+    representative_count = len(representative_indices)
     completed_by_key: dict[str, Any] = {}
     batch_method = getattr(adapter, "recognize_many", None)
     ocr_worker_count = 1 if callable(batch_method) else _ocr_workers()
     cache_entries = dict(cached)
+    prefetched_hits = 0
+    prefetched = prefetched_by_frame_id or {}
+    if prefetched and representative_indices:
+        from .ocr import OCRObservation
+
+        remaining_indices: list[int] = []
+        for index in representative_indices:
+            frame_id = str(ordered_frames[index]["frame_id"])
+            observation = prefetched.get(frame_id)
+            if isinstance(observation, OCRObservation):
+                completed_by_key[frame_keys[index]] = observation
+                cache_entries[frame_keys[index]] = observation
+                prefetched_hits += 1
+            else:
+                remaining_indices.append(index)
+        representative_indices = remaining_indices
     checkpoint_flush_count = 0
     checkpoint_write_failures = 0
 
@@ -3455,7 +3749,13 @@ def _load_or_run_ocr(
         "shared_cache_path": str(shared_cache_path) if shared_cache_path is not None else None,
         "cache_hit_count": cache_hits,
         "shared_cache_hit": shared_cache_hit,
-        "cache_miss_count": len(representative_indices),
+        "cache_miss_count": representative_count,
+        "prefetch_hit_count": prefetched_hits,
+        "prefetch_submitted_count": int((prefetch_metrics or {}).get("submitted_count", 0)),
+        "prefetch_recognized_count": int((prefetch_metrics or {}).get("recognized_count", 0)),
+        "prefetch_batch_count": int((prefetch_metrics or {}).get("batch_count", 0)),
+        "prefetch_worker_count": int((prefetch_metrics or {}).get("worker_count", 1)),
+        "prefetch_error": (prefetch_metrics or {}).get("error"),
         "cache_deduplicated_count": max(0, len(pending) - len(representative_indices)),
         "cache_written": cache_written,
         "shared_cache_written": shared_cache_written,
@@ -3489,6 +3789,7 @@ def _load_or_extract_visual_frames(
     shared_frames: Sequence[Any] = (),
     shared_cache_dir: Path | None = None,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[Any], None] | None = None,
 ) -> tuple[Any, ...]:
     """Reuse raw, measured PNG frames across an interrupted visual rebuild.
 
@@ -3547,6 +3848,38 @@ def _load_or_extract_visual_frames(
         except OSError as exc:
             LOGGER.warning("Visual shared cache unavailable at %s: %s", candidate_root, exc)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    requested_indexes = {requested_ms: index for index, requested_ms in enumerate(ordered_times)}
+    published_indexes: set[int] = set()
+
+    def publish_frame(frame: Any) -> None:
+        """Expose one measured frame at a stable evidence path for prefetch."""
+
+        if on_frame is None:
+            return
+        requested_ms = getattr(frame, "requested_ms", None)
+        index = requested_indexes.get(requested_ms)
+        if index is None or index in published_indexes:
+            return
+        frame_id = f"F{index + 1:06d}"
+        destination = output_dir / (
+            f"{frame_id}__{format_frame_timestamp(int(frame.actual_ms))}__full.png"
+        )
+        source_path = Path(frame.path)
+        if source_path.resolve() != destination.resolve():
+            if destination.exists():
+                if normalized_pixel_hash(destination) != normalized_pixel_hash(source_path):
+                    raise ValidationFailure(
+                        f"Streaming frame has conflicting pixels: {destination.name}"
+                    )
+            else:
+                try:
+                    os.link(source_path, destination)
+                except OSError:
+                    _copy_file_atomic(source_path, destination, durable=False)
+        published_indexes.add(index)
+        on_frame(replace(frame, frame_id=frame_id, path=destination.resolve()))
+
     cache_limit = _visual_frame_cache_limit()
     shared_cache_limit = _visual_shared_cache_limit()
     if shared_cache_limit <= 0:
@@ -3667,6 +4000,8 @@ def _load_or_extract_visual_frames(
         if restored is not None:
             LOGGER.info("Reused cross-project visual frame checkpoint: %s", shared_cache_path)
     if restored is not None:
+        for frame in restored:
+            publish_frame(frame)
         return restored
 
     def restore_prior_schedule_frames() -> dict[int, ExtractedFrame]:
@@ -3881,6 +4216,7 @@ def _load_or_extract_visual_frames(
                 except (OSError, ValueError, TypeError, ValidationFailure):
                     continue
                 restored_by_request[int(frame.requested_ms)] = frame
+                publish_frame(frame)
         if restored_by_request:
             LOGGER.info(
                 "Reused %d measured visual frames from prior schedules",
@@ -3969,6 +4305,7 @@ def _load_or_extract_visual_frames(
         ) as pool:
             for index, shared_frame in pool.map(materialize_shared, shared_jobs):
                 extracted_by_index[index] = shared_frame
+                publish_frame(shared_frame)
 
     prior_by_request = restore_prior_schedule_frames()
     for index, requested_ms in enumerate(ordered_times):
@@ -4004,6 +4341,8 @@ def _load_or_extract_visual_frames(
                 extract_kwargs["ffmpeg_bin"] = ffmpeg_path
             if worker_pool is not None and "worker_pool" in extract_parameters:
                 extract_kwargs["worker_pool"] = worker_pool
+            if on_frame is not None and "on_frame" in extract_parameters:
+                extract_kwargs["on_frame"] = publish_frame
             decoded = extract_frames(source, missing_times, pending_dir, **extract_kwargs)
             for (index, _requested_ms), frame in zip(missing, decoded, strict=True):
                 frame_id = f"F{index + 1:06d}"
@@ -4708,6 +5047,7 @@ def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
         "ocr_workers": _ocr_workers(),
         "ocr_checkpoint_batch": _ocr_checkpoint_flush_interval(),
         "ocr_batch_size": _ocr_batch_size(),
+        "paddle_ocr_workers": _paddle_ocr_batch_workers(),
         "asr_cpu_threads": _asr_cpu_threads(),
         "asr_num_workers": _faster_whisper_num_workers(duration_ms=duration_ms),
         "asr_shared_cache": _asr_shared_cache_dir() is not None,
@@ -4788,6 +5128,7 @@ def _extract_visual_evidence_legacy(
     source_sha256: str | None = None,
     precomputed_survey: _PrecomputedVisualSurvey | None = None,
     worker_pool: ThreadPoolExecutor | None = None,
+    frame_callback: Callable[[Any], None] | None = None,
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -5001,6 +5342,7 @@ def _extract_visual_evidence_legacy(
             shared_frames=shared_frames,
             shared_cache_dir=_visual_shared_cache_dir(),
             worker_pool=worker_pool,
+            on_frame=frame_callback,
         )
     finally:
         shutil.rmtree(shared_frame_dir, ignore_errors=True)
@@ -5332,31 +5674,51 @@ def _extract_visual_evidence(
         except Exception:  # pragma: no cover - optional telemetry boundary
             LOGGER.warning("Visual progress callback failed", exc_info=True)
 
+    adapter = ocr_adapter if ocr_enabled else None
+    prefetch: _StreamingOCRPrefetch | None = None
+    prefetched_by_frame_id: dict[str, Any] = {}
+    prefetch_metrics: dict[str, Any] = {}
+    if adapter is not None and callable(getattr(adapter, "recognize_many", None)):
+        try:
+            prefetch = _StreamingOCRPrefetch(
+                adapter,
+                batch_size=_ocr_batch_size(),
+                worker_count=_paddle_ocr_batch_workers(adapter),
+            )
+        except InputError:
+            LOGGER.info("Streaming OCR prefetch is unavailable for this adapter")
+
     decode_started = time.perf_counter()
-    frames, payloads, revisions, events, reviews = _extract_visual_evidence_legacy(
-        source,
-        project_dir,
-        media_id,
-        duration_ms,
-        blocks,
-        survey_interval_seconds=survey_interval_seconds,
-        strict=strict,
-        ocr_adapter=ocr_adapter,
-        scene_detection_enabled=scene_detection_enabled,
-        frame_difference_enabled=frame_difference_enabled,
-        source_sha256=source_sha256,
-        precomputed_survey=precomputed_survey,
-        worker_pool=worker_pool,
-    )
+    try:
+        frames, payloads, revisions, events, reviews = _extract_visual_evidence_legacy(
+            source,
+            project_dir,
+            media_id,
+            duration_ms,
+            blocks,
+            survey_interval_seconds=survey_interval_seconds,
+            strict=strict,
+            ocr_adapter=ocr_adapter,
+            scene_detection_enabled=scene_detection_enabled,
+            frame_difference_enabled=frame_difference_enabled,
+            source_sha256=source_sha256,
+            precomputed_survey=precomputed_survey,
+            worker_pool=worker_pool,
+            frame_callback=prefetch.submit if prefetch is not None else None,
+        )
+    finally:
+        if prefetch is not None:
+            prefetch.finish()
+            prefetched_by_frame_id = prefetch.observations
+            prefetch_metrics = prefetch.metrics
     emit_progress(
         "frame_decode_completed",
         full_frame_count=len(frames),
         elapsed_seconds=round(time.perf_counter() - decode_started, 6),
+        streaming_ocr_prefetch=prefetch_metrics,
     )
     if not frames:
         return frames, payloads, revisions, events, reviews, []
-
-    adapter = ocr_adapter if ocr_enabled else None
 
     ordered = sorted(frames, key=lambda item: (int(item["actual_ms"]), str(item["frame_id"])))
     quality_by_id: dict[str, Any] = {}
@@ -5380,6 +5742,8 @@ def _extract_visual_evidence(
                 adapter_key=ocr_cache_key,
                 source_sha256=source_sha256,
                 shared_cache_dir=_visual_shared_cache_dir(),
+                prefetched_by_frame_id=prefetched_by_frame_id,
+                prefetch_metrics=prefetch_metrics,
             )
             sequence_results = analyze_frame_sequence_with_hash(
                 [project_dir / str(frame["full_frame_path"]) for frame in ordered],
@@ -5398,6 +5762,8 @@ def _extract_visual_evidence(
                     adapter_key=ocr_cache_key,
                     source_sha256=source_sha256,
                     shared_cache_dir=_visual_shared_cache_dir(),
+                    prefetched_by_frame_id=prefetched_by_frame_id,
+                    prefetch_metrics=prefetch_metrics,
                 )
                 analysis_future = phase_pool.submit(
                     analyze_frame_sequence_with_hash,

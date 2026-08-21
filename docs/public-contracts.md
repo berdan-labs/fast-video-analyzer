@@ -221,6 +221,7 @@ VSR_OCR_BATCH_SIZE
 VSR_OCR_CHECKPOINT_BATCH
 VSR_PADDLE_OCR_PERSISTENT_WORKER
 VSR_PADDLE_OCR_PYTHON
+VSR_PADDLE_OCR_WORKERS
 VSR_PARALLEL_VISUAL_SURVEY
 VSR_QWEN_SPEECH_PYTHON
 ```
@@ -237,6 +238,13 @@ VSR_RESULT
 
 Other libraries’ environment variables, arbitrary `VSR_*` names, and secrets
 are not supported configuration surfaces.
+
+`VSR_PADDLE_OCR_WORKERS` is an owner-tuned acceleration switch, capped at two
+independent persistent Paddle workers and defaulting to one. It is used only
+when the selected adapter exposes a safe worker factory; otherwise the run
+falls back to one worker. The setting changes scheduling and resource use, not
+the OCR/evidence contract, and should be enabled only after a representative
+parity and memory benchmark on the host.
 
 ## Change and deprecation policy
 
