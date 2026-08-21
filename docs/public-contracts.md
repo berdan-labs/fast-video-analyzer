@@ -239,6 +239,16 @@ PNG checksums, interruption/resume, and peak-resource receipts. The batch-size
 and frame-count variables are bounded acceleration controls, not sampling
 policy controls.
 
+Large sparse final-frame schedules may be extracted through bounded FFmpeg
+concat-seek chunks. This is an automatic execution optimization, not a sampling
+policy: every requested timestamp keeps its own guarded exact-seek window, the
+measured decoder PTS is deterministically restored to the source clock, and PNG
+pixels remain the evidence authority. Unsupported clocks, missing frames,
+non-deterministic ordering, timing outside a guarded window, or chunk failures
+fall back to the existing per-request extraction path. The optimization does
+not change frame IDs, requested timestamps, evidence filenames, or validation
+requirements.
+
 Variables used only by tests or subprocess fixtures are not a user contract:
 
 ```text

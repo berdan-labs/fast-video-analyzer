@@ -15,6 +15,7 @@ from video_script_reconstructor.errors import InputError, ValidationFailure
 from video_script_reconstructor.frame_extract import (
     ExtractedFrame,
     build_batch_frame_extraction_command,
+    build_concat_seek_frame_extraction_command,
     build_frame_extraction_command,
     extract_evidence_frame,
     extract_frames,
@@ -744,6 +745,186 @@ def test_batch_command_stops_at_last_request_lookahead(tmp_path: Path) -> None:
     assert command[command.index("-i") + 1] == str(source)
     assert command[command.index("-to") + 1] == "3.250"
     assert command[command.index("-vf") + 1].startswith("select=")
+
+
+def test_concat_seek_command_uses_stateful_guarded_windows(tmp_path: Path) -> None:
+    schedule = tmp_path / "schedule.ffconcat"
+    pattern = tmp_path / "frame-%06d.png"
+    command = build_concat_seek_frame_extraction_command(
+        schedule, pattern, ffmpeg_threads=4
+    )
+    assert command[command.index("-i") + 1] == str(schedule)
+    assert command[command.index("-f") + 1] == "concat"
+    assert command[command.index("-segment_time_metadata") + 1] == "1"
+    assert "concatdec_select" in command[command.index("-vf") + 1]
+    assert "prev_selected_t" in command[command.index("-vf") + 1]
+    assert command[command.index("-threads") + 1] == "4"
+
+
+def test_concat_seek_rebases_measured_pts_to_source_clock() -> None:
+    synthetic = frame_extract_module.DecodedFrameTiming(
+        output_index=1,
+        raw_pts=10_742,
+        actual_ms=1_049,
+        time_base="1/10240",
+        width=640,
+        height=360,
+    )
+    source = frame_extract_module._source_timing_from_concat(
+        synthetic,
+        position=1,
+        requested_ms=1_851,
+    )
+    assert source.actual_ms == 1_900
+    assert source.raw_pts == 19_456
+    assert source.time_base == "1/10240"
+
+
+def test_large_sparse_concat_seek_matches_independent_exact_frames(tmp_path: Path) -> None:
+    source = Path(__file__).parents[1] / "fixtures" / "generated" / "slide-lecture.mp4"
+    requested = list(range(0, 3_751, 250))
+    accelerated = extract_frames(
+        source,
+        requested,
+        tmp_path / "accelerated",
+        batch=True,
+        max_workers=2,
+        timeout_seconds=30.0,
+    )
+    exact = extract_frames(
+        source,
+        requested,
+        tmp_path / "exact",
+        batch=False,
+        max_workers=2,
+        timeout_seconds=30.0,
+    )
+    assert [(frame.actual_ms, frame.raw_pts, frame.time_base) for frame in accelerated] == [
+        (frame.actual_ms, frame.raw_pts, frame.time_base) for frame in exact
+    ]
+    assert [normalized_pixel_hash(frame.path) for frame in accelerated] == [
+        normalized_pixel_hash(frame.path) for frame in exact
+    ]
+
+
+def test_concat_seek_failure_falls_back_to_individual_exact_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"placeholder")
+    requested = list(range(0, 16_000, 1_000))
+    exact_calls: list[int] = []
+
+    def fail_concat(*_args: object, **_kwargs: object) -> tuple[ExtractedFrame, ...]:
+        raise ValidationFailure("fixture concat route is unavailable")
+
+    def fake_exact(
+        _media_path: Path,
+        requested_ms: int,
+        output_dir: Path,
+        *,
+        frame_id: str,
+        **_kwargs: object,
+    ) -> ExtractedFrame:
+        exact_calls.append(requested_ms)
+        return ExtractedFrame(
+            frame_id=frame_id,
+            path=output_dir / f"{frame_id}.png",
+            requested_ms=requested_ms,
+            actual_ms=requested_ms,
+            raw_pts=requested_ms,
+            time_base="1/1000",
+            frame_index=None,
+            offset_ms=0,
+            timestamp_source="fixture",
+            width=640,
+            height=360,
+        )
+
+    monkeypatch.setattr(frame_extract_module, "_run_concat_seek_group", fail_concat)
+    monkeypatch.setattr(frame_extract_module, "extract_evidence_frame", fake_exact)
+    frames = extract_frames(
+        source,
+        requested,
+        tmp_path / "frames",
+        batch=True,
+        max_workers=2,
+    )
+    assert sorted(exact_calls) == requested
+    assert [frame.requested_ms for frame in frames] == requested
+
+
+def test_concat_seek_preserves_frame_ids_across_noncontiguous_exact_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"placeholder")
+    first = tuple(range(0, 16_000, 1_000))
+    dense = (20_000, 20_100, 20_500)
+    second = tuple(range(30_000, 46_000, 1_000))
+    groups = (first, dense, second)
+    concat_first_numbers: list[int] = []
+
+    def make_frames(
+        requested_times_ms: tuple[int, ...],
+        output_dir: Path,
+        first_frame_number: int,
+    ) -> tuple[ExtractedFrame, ...]:
+        return tuple(
+            ExtractedFrame(
+                frame_id=f"F{first_frame_number + offset:06d}",
+                path=output_dir / f"F{first_frame_number + offset:06d}.png",
+                requested_ms=requested_ms,
+                actual_ms=requested_ms,
+                raw_pts=requested_ms,
+                time_base="1/1000",
+                frame_index=None,
+                offset_ms=0,
+                timestamp_source="fixture",
+                width=640,
+                height=360,
+            )
+            for offset, requested_ms in enumerate(requested_times_ms)
+        )
+
+    def fake_concat(
+        _media_path: Path,
+        requested_times_ms: tuple[int, ...],
+        output_dir: Path,
+        *,
+        first_frame_number: int,
+        **_kwargs: object,
+    ) -> tuple[ExtractedFrame, ...]:
+        concat_first_numbers.append(first_frame_number)
+        return make_frames(requested_times_ms, output_dir, first_frame_number)
+
+    def fake_batch(
+        _media_path: Path,
+        requested_times_ms: tuple[int, ...],
+        output_dir: Path,
+        *,
+        first_frame_number: int,
+        **_kwargs: object,
+    ) -> tuple[ExtractedFrame, ...]:
+        return make_frames(requested_times_ms, output_dir, first_frame_number)
+
+    monkeypatch.setattr(frame_extract_module, "_batch_request_groups", lambda _times: groups)
+    monkeypatch.setattr(
+        frame_extract_module, "_prefer_exact_group", lambda group: group != dense
+    )
+    monkeypatch.setattr(frame_extract_module, "_run_concat_seek_group", fake_concat)
+    monkeypatch.setattr(frame_extract_module, "_run_batch_group", fake_batch)
+    frames = extract_frames(
+        source,
+        first + dense + second,
+        tmp_path / "frames",
+        batch=True,
+        max_workers=2,
+    )
+    assert concat_first_numbers == [1, 20]
+    assert [frame.frame_id for frame in frames] == [
+        f"F{number:06d}" for number in range(1, len(frames) + 1)
+    ]
 
 
 def test_batched_selector_emits_all_requests_without_exact_seek_fallback(
