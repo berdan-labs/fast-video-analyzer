@@ -100,6 +100,7 @@ def test_doctor_reports_bounded_scheduler_settings(tmp_path: Path, monkeypatch) 
         "asr_num_workers": 1,
         "validator_metadata_workers": _metadata_verify_workers(),
         "parallel_visual_survey": True,
+        "parallel_visual_warmup": False,
     }
 
 

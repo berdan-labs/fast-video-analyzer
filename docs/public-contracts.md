@@ -223,8 +223,21 @@ VSR_PADDLE_OCR_PERSISTENT_WORKER
 VSR_PADDLE_OCR_PYTHON
 VSR_PADDLE_OCR_WORKERS
 VSR_PARALLEL_VISUAL_SURVEY
+VSR_PARALLEL_VISUAL_WARMUP
+VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE
+VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES
 VSR_QWEN_SPEECH_PYTHON
 ```
+
+`VSR_PARALLEL_VISUAL_WARMUP=on` is an owner-tuned experiment for long local
+video runs. It asks the transcript-independent survey worker to pre-extract a
+bounded set of exact survey timestamps into schedule-bound raw-frame
+checkpoints while ASR runs. The default is off; omitted or failed batches are
+recovered by the canonical visual extractor, and the switch must not be used
+as a quality or `<15`-minute claim without cold/resume parity, measured PTS and
+PNG checksums, interruption/resume, and peak-resource receipts. The batch-size
+and frame-count variables are bounded acceleration controls, not sampling
+policy controls.
 
 Variables used only by tests or subprocess fixtures are not a user contract:
 

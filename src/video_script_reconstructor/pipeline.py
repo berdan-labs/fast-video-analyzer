@@ -290,6 +290,10 @@ class _PrecomputedVisualSurvey:
     candidates: tuple[Any, ...]
     shared_frames: tuple[Any, ...]
     shared_frame_dir: Path
+    prefetched_frame_count: int = 0
+    prefetched_batch_count: int = 0
+    prefetch_failed_batch_count: int = 0
+    prefetch_elapsed_seconds: float = 0.0
 
 
 def _now() -> str:
@@ -638,6 +642,7 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "asr_num_workers": _faster_whisper_num_workers(),
             "validator_metadata_workers": _metadata_verify_workers(),
             "parallel_visual_survey": _parallel_visual_survey_enabled(),
+            "parallel_visual_warmup": _parallel_visual_warmup_enabled(),
         },
         "fix": (
             "Override VSR_FRAME_EXTRACT_WORKERS, VSR_FRAME_ANALYSIS_WORKERS, "
@@ -646,7 +651,8 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "VSR_OCR_BATCH_SIZE, "
             "VSR_PADDLE_OCR_WORKERS, "
             "VSR_ASR_CPU_THREADS, VSR_FASTER_WHISPER_NUM_WORKERS, or "
-            "VSR_VALIDATOR_METADATA_WORKERS "
+            "VSR_VALIDATOR_METADATA_WORKERS, VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE, or "
+            "VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES "
             "only after a representative offline benchmark."
         ),
     }
@@ -5030,6 +5036,180 @@ def _parallel_visual_survey_enabled(
     return shutil.which("nvidia-smi") is not None
 
 
+def _parallel_visual_warmup_enabled(
+    *, duration_ms: int | None = None, automatic_adapter: bool = True
+) -> bool:
+    """Return whether exact survey-frame warmup may overlap local ASR.
+
+    Unlike the transcript-independent survey itself, exact frame warmup is an
+    owner-tuned experiment.  It is therefore explicitly off by default: a
+    caller must opt in after measuring CPU, disk, and ASR contention on the
+    target host.  The warmup never changes the candidate set; it only writes
+    bounded raw-frame checkpoints that the ordinary visual stage may reuse.
+    """
+
+    policy = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP", "off").strip().lower()
+    if policy in {"0", "false", "no", "off", ""}:
+        return False
+    if policy in {"1", "true", "yes", "on"}:
+        return bool(automatic_adapter and (duration_ms is None or duration_ms >= 5 * 60 * 1000))
+    if policy == "auto":
+        # Keep auto deliberately conservative until an owner records a cold
+        # matrix showing that the extra decoder work does not slow ASR or
+        # exceed memory/disk limits.  Explicit ``on`` is the experiment gate.
+        return False
+    LOGGER.warning("Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP=%r", policy)
+    return False
+
+
+def _parallel_visual_warmup_batch_size() -> int:
+    """Return the bounded exact-frame warmup batch size."""
+
+    raw = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE", "64").strip()
+    try:
+        return max(1, min(128, int(raw)))
+    except ValueError:
+        LOGGER.warning(
+            "Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE=%r", raw
+        )
+        return 64
+
+
+def _parallel_visual_warmup_max_frames() -> int:
+    """Return the hard cap for transcript-independent warmup requests."""
+
+    raw = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES", "1024").strip()
+    try:
+        return max(0, min(4096, int(raw)))
+    except ValueError:
+        LOGGER.warning(
+            "Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES=%r", raw
+        )
+        return 1024
+
+
+def _survey_candidate_point(candidate: Any, *, duration_ms: int) -> int | None:
+    """Resolve a survey candidate exactly as the canonical visual stage does."""
+
+    requested = getattr(candidate, "requested_ms", None)
+    actual = getattr(candidate, "actual_ms", None)
+    if actual is None and requested is None:
+        return None
+    try:
+        point = int(actual if actual is not None else requested)
+    except (TypeError, ValueError):
+        return None
+    return min(max(point, 0), max(duration_ms - 1, 0))
+
+
+def _transcript_independent_warmup_times(
+    candidates: Sequence[Any],
+    shared_frames: Sequence[Any],
+    *,
+    duration_ms: int,
+) -> tuple[int, ...]:
+    """Return exact survey points not already covered by emitted survey PNGs.
+
+    The final visual stage resolves each survey candidate to the same measured
+    ``actual_ms``/requested timestamp.  Prefetching those points through the
+    guarded exact extractor is therefore byte-safe.  Existing shared survey
+    PNGs are intentionally excluded because the final stage still owns and
+    materializes those temporary files.
+    """
+
+    already_emitted: set[int] = set()
+    for frame in shared_frames:
+        branch = getattr(frame, "branch", None)
+        requested = getattr(frame, "requested_ms", None)
+        if branch in {"hard", "periodic"} and isinstance(requested, int):
+            already_emitted.add(int(requested))
+    points = {
+        point
+        for candidate in candidates
+        if (point := _survey_candidate_point(candidate, duration_ms=duration_ms)) is not None
+        and point not in already_emitted
+    }
+    ordered = tuple(sorted(points))
+    limit = _parallel_visual_warmup_max_frames()
+    if limit <= 0 or len(ordered) <= limit:
+        return ordered
+    # This is an acceleration-only cap.  Keep a deterministic temporal spread
+    # and leave all omitted timestamps to the canonical guarded extractor.
+    return _bounded_shared_survey_emission_times(ordered, max_count=limit)
+
+
+def _prefetch_transcript_independent_visual_frames(
+    source: Path,
+    project_dir: Path,
+    *,
+    duration_ms: int,
+    candidates: Sequence[Any],
+    shared_frames: Sequence[Any],
+    frame_output_dir: Path,
+    source_sha256: str | None,
+) -> dict[str, Any]:
+    """Warm exact survey timestamps into bounded schedule checkpoints.
+
+    Each batch has its own schedule-bound checkpoint and disposable output
+    directory.  A failed batch is recorded and ignored; the normal visual
+    stage still extracts any missing timestamp through its authoritative path.
+    """
+
+    times = _transcript_independent_warmup_times(
+        candidates,
+        shared_frames,
+        duration_ms=duration_ms,
+    )
+    result = {
+        "requested_count": len(times),
+        "prefetched_frame_count": 0,
+        "prefetched_batch_count": 0,
+        "prefetch_failed_batch_count": 0,
+        "prefetch_elapsed_seconds": 0.0,
+        "prefetch_error": None,
+    }
+    if not times or _visual_frame_cache_limit() <= 0:
+        return result
+
+    started = time.perf_counter()
+    warmup_root = frame_output_dir / "warmup"
+    batch_size = _parallel_visual_warmup_batch_size()
+    first_error: str | None = None
+    for batch_index, start in enumerate(range(0, len(times), batch_size)):
+        batch_times = times[start : start + batch_size]
+        output_dir = warmup_root / f"batch-{batch_index:06d}"
+        try:
+            extracted = _load_or_extract_visual_frames(
+                source,
+                project_dir,
+                output_dir,
+                batch_times,
+                duration_ms=duration_ms,
+                max_workers=_visual_frame_workers(),
+                source_sha256=source_sha256,
+                shared_frames=(),
+                shared_cache_dir=None,
+                worker_pool=None,
+            )
+        except Exception as exc:  # pragma: no cover - FFmpeg/filesystem specific
+            result["prefetch_failed_batch_count"] += 1
+            if first_error is None:
+                first_error = str(exc)
+            LOGGER.warning(
+                "Transcript-independent visual warmup batch %d failed; canonical extraction will recover it",
+                batch_index,
+                exc_info=True,
+            )
+        else:
+            result["prefetched_frame_count"] += len(extracted)
+            result["prefetched_batch_count"] += 1
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+    result["prefetch_elapsed_seconds"] = round(time.perf_counter() - started, 6)
+    result["prefetch_error"] = first_error
+    return result
+
+
 def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
     """Record the bounded scheduling decisions used by this run.
 
@@ -5053,6 +5233,7 @@ def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
         "asr_shared_cache": _asr_shared_cache_dir() is not None,
         "visual_shared_cache": _visual_shared_cache_dir() is not None,
         "parallel_visual_survey": _parallel_visual_survey_enabled(duration_ms=duration_ms),
+        "parallel_visual_warmup": _parallel_visual_warmup_enabled(duration_ms=duration_ms),
         "guarded_motion_dedup": _guarded_motion_only_enabled(),
     }
 
@@ -5067,6 +5248,7 @@ def _precompute_visual_survey(
     scene_detection: bool,
     adaptive_detection: bool,
     source_sha256: str | None,
+    prefetch_exact_frames: bool = False,
 ) -> _PrecomputedVisualSurvey:
     """Run the source survey independently of transcript/ASR decoding.
 
@@ -5106,10 +5288,27 @@ def _precompute_visual_survey(
     except Exception:
         shutil.rmtree(frame_output_dir, ignore_errors=True)
         raise
+    prefetch_metrics: dict[str, Any] = {}
+    if prefetch_exact_frames:
+        prefetch_metrics = _prefetch_transcript_independent_visual_frames(
+            source,
+            project_dir,
+            duration_ms=duration_ms,
+            candidates=candidates,
+            shared_frames=shared_frames,
+            frame_output_dir=frame_output_dir,
+            source_sha256=source_sha256,
+        )
     return _PrecomputedVisualSurvey(
         candidates=tuple(candidates),
         shared_frames=tuple(shared_frames),
         shared_frame_dir=frame_output_dir,
+        prefetched_frame_count=int(prefetch_metrics.get("prefetched_frame_count", 0)),
+        prefetched_batch_count=int(prefetch_metrics.get("prefetched_batch_count", 0)),
+        prefetch_failed_batch_count=int(
+            prefetch_metrics.get("prefetch_failed_batch_count", 0)
+        ),
+        prefetch_elapsed_seconds=float(prefetch_metrics.get("prefetch_elapsed_seconds", 0.0)),
     )
 
 
@@ -8228,11 +8427,19 @@ def run_pipeline(
                     scene_detection=config.visual.scene_detection,
                     adaptive_detection=config.visual.frame_difference,
                     source_sha256=source_sha256,
+                    prefetch_exact_frames=_parallel_visual_warmup_enabled(
+                        duration_ms=duration_ms_value,
+                        automatic_adapter=asr_adapter is None,
+                    ),
                 )
                 persist_visual_progress(
                     {
                         "event": "survey_parallel_started",
                         "reason": "overlapped source survey with local ASR",
+                        "exact_frame_warmup": _parallel_visual_warmup_enabled(
+                            duration_ms=duration_ms_value,
+                            automatic_adapter=asr_adapter is None,
+                        ),
                         "elapsed_seconds": 0.0,
                     }
                 )
@@ -8424,6 +8631,10 @@ def run_pipeline(
                         "event": "survey_parallel_completed",
                         "shared_frame_count": len(precomputed_visual_survey.shared_frames),
                         "candidate_count": len(precomputed_visual_survey.candidates),
+                        "prefetched_frame_count": precomputed_visual_survey.prefetched_frame_count,
+                        "prefetched_batch_count": precomputed_visual_survey.prefetched_batch_count,
+                        "prefetch_failed_batch_count": precomputed_visual_survey.prefetch_failed_batch_count,
+                        "prefetch_elapsed_seconds": precomputed_visual_survey.prefetch_elapsed_seconds,
                         "elapsed_seconds": round(
                             time.perf_counter() - (parallel_survey_started_at or time.perf_counter()),
                             6,

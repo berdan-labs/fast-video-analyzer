@@ -27,6 +27,7 @@ from video_script_reconstructor.pipeline import (
     _load_or_run_visual_survey_with_frames,
     _next_review_id,
     _parallel_visual_survey_enabled,
+    _parallel_visual_warmup_enabled,
     _precompute_visual_survey,
     _prune_visual_frame_checkpoints,
     _reuse_visual_state,
@@ -549,6 +550,121 @@ def test_parallel_visual_survey_precompute_has_no_transcript_context(
     assert result.candidates[0].requested_ms == 0
     assert result.shared_frame_dir.is_dir()
     shutil.rmtree(result.shared_frame_dir)
+
+
+def test_parallel_visual_warmup_is_explicit_and_long_media_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VSR_PARALLEL_VISUAL_WARMUP", raising=False)
+    assert _parallel_visual_warmup_enabled(duration_ms=300_000) is False
+    monkeypatch.setenv("VSR_PARALLEL_VISUAL_WARMUP", "on")
+    assert _parallel_visual_warmup_enabled(duration_ms=299_999) is False
+    assert _parallel_visual_warmup_enabled(duration_ms=300_000) is True
+    assert _parallel_visual_warmup_enabled(duration_ms=300_000, automatic_adapter=False) is False
+    monkeypatch.setenv("VSR_PARALLEL_VISUAL_WARMUP", "auto")
+    assert _parallel_visual_warmup_enabled(duration_ms=300_000) is False
+
+
+def test_transcript_independent_warmup_times_exclude_emitted_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from video_script_reconstructor.pipeline import _transcript_independent_warmup_times
+    from video_script_reconstructor.scene_detection import SurveyFrame, SurveyFrameTiming
+
+    monkeypatch.setenv("VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES", "1024")
+    candidates = (
+        SurveyCandidate(
+            candidate_id="VC000001",
+            requested_ms=0,
+            actual_ms=None,
+            raw_pts=None,
+            time_base=None,
+            reasons=("periodic_safety",),
+            score=0.25,
+            timestamp_source="requested-candidate",
+        ),
+        SurveyCandidate(
+            candidate_id="VC000002",
+            requested_ms=10_000,
+            actual_ms=10_120,
+            raw_pts=10,
+            time_base="1/1000",
+            reasons=("scene_cut",),
+            score=0.9,
+            timestamp_source="ffmpeg-showinfo",
+        ),
+    )
+    emitted = (
+        SurveyFrame(
+            branch="periodic",
+            requested_ms=0,
+            path=Path("periodic.png"),
+            timing=SurveyFrameTiming(
+                output_index=0,
+                raw_pts=0,
+                actual_ms=0,
+                time_base="1/1000",
+                width=10,
+                height=10,
+            ),
+        ),
+    )
+    assert _transcript_independent_warmup_times(
+        candidates,
+        emitted,
+        duration_ms=20_000,
+    ) == (10_120,)
+
+
+def test_precompute_visual_survey_can_warm_exact_frames_without_changing_candidates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"deterministic source")
+    project = tmp_path / "project"
+    survey_frame_dir = project / "survey"
+    candidate = SurveyCandidate(
+        candidate_id="VC000001",
+        requested_ms=1_000,
+        actual_ms=1_002,
+        raw_pts=42,
+        time_base="1/1000",
+        reasons=("scene_cut",),
+        score=0.9,
+        timestamp_source="ffmpeg-showinfo",
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline._load_or_run_visual_survey_with_frames",
+        lambda *_args, **_kwargs: ((candidate,), ()),
+    )
+    calls: list[tuple[int, ...]] = []
+
+    def fake_extract(_source, _project, _output, times, **_kwargs):
+        calls.append(tuple(times))
+        return (object(),) * len(times)
+
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline._load_or_extract_visual_frames",
+        fake_extract,
+    )
+    result = _precompute_visual_survey(
+        source,
+        project,
+        duration_ms=10_000,
+        interval_seconds=30.0,
+        strict=True,
+        scene_detection=True,
+        adaptive_detection=True,
+        source_sha256="source-digest",
+        prefetch_exact_frames=True,
+    )
+
+    assert result.candidates == (candidate,)
+    assert result.prefetched_frame_count == 1
+    assert result.prefetched_batch_count == 1
+    assert result.prefetch_failed_batch_count == 0
+    assert calls == [(1_002,)]
+    shutil.rmtree(survey_frame_dir, ignore_errors=True)
 
 
 def test_context_change_reuses_structural_survey_with_frames(
