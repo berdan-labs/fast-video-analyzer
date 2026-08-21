@@ -55,11 +55,10 @@ def _load_engine(request: dict[str, Any]) -> tuple[Any, str]:
     return ocr, device
 
 
-def _recognize_image(ocr: Any, image_path: Path, *, device: str) -> list[dict[str, Any]]:
-    results = list(ocr.predict(str(image_path)))
-    if len(results) != 1:
-        raise RuntimeError(f"Expected one OCR page result, received {len(results)}")
-    payload = results[0].json
+def _lines_from_result(result: Any) -> list[dict[str, Any]]:
+    """Convert one Paddle OCR result into the newline-protocol line shape."""
+
+    payload = result.json
     if not isinstance(payload, dict) or not isinstance(payload.get("res"), dict):
         raise RuntimeError("PP-OCRv5 returned an unsupported result payload")
     data = payload["res"]
@@ -85,6 +84,33 @@ def _recognize_image(ocr: Any, image_path: Path, *, device: str) -> list[dict[st
             }
         )
     return lines
+
+
+def _recognize_image(ocr: Any, image_path: Path, *, device: str) -> list[dict[str, Any]]:
+    results = list(ocr.predict(str(image_path)))
+    if len(results) != 1:
+        raise RuntimeError(f"Expected one OCR page result, received {len(results)}")
+    return _lines_from_result(results[0])
+
+
+def _recognize_images(
+    ocr: Any, image_paths: list[Path], *, device: str
+) -> list[list[dict[str, Any]]]:
+    """Run a bounded image list through Paddle in one predictor call.
+
+    Paddle's predictor can accept a list of paths and amortize detector setup
+    and GPU synchronization across the batch.  The returned sequence is kept
+    in the exact input order; callers still validate its cardinality before
+    attaching observations to frame IDs.
+    """
+
+    results = list(ocr.predict([str(path) for path in image_paths]))
+    if len(results) != len(image_paths):
+        raise RuntimeError(
+            "Expected one OCR page result per image, "
+            f"received {len(results)} for {len(image_paths)} images"
+        )
+    return [_lines_from_result(result) for result in results]
 
 
 def _package_versions() -> dict[str, str | None]:
@@ -135,12 +161,12 @@ def _recognize_batch(
     else:
         device = loaded_device or str(request.get("device", "gpu:0"))
         versions = loaded_versions or _package_versions()
-    items: list[dict[str, Any]] = []
-    for value in images:
-        image_path = _path(value, directory=False, field="image_path")
-        items.append(
-            {"image_path": str(image_path), "lines": _recognize_image(ocr, image_path, device=device)}
-        )
+    image_paths = [_path(value, directory=False, field="image_path") for value in images]
+    line_sets = _recognize_images(ocr, image_paths, device=device)
+    items = [
+        {"image_path": str(image_path), "lines": lines}
+        for image_path, lines in zip(image_paths, line_sets, strict=True)
+    ]
     return {
         "ok": True,
         "mode": "recognize_batch",

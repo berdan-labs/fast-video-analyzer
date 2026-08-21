@@ -102,11 +102,16 @@ def test_persistent_worker_reuses_loaded_engine_across_batches(
         lambda: {"paddleocr": "fixture", "paddlepaddle-gpu": "fixture"},
     )
 
-    def fake_recognize(_ocr: object, image: Path, *, device: str) -> list[dict[str, object]]:
-        calls["images"].append((image, device))
-        return [{"text": image.name, "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}]
+    def fake_recognize(
+        _ocr: object, images: list[Path], *, device: str
+    ) -> list[list[dict[str, object]]]:
+        calls["images"].extend((image, device) for image in images)
+        return [
+            [{"text": image.name, "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}]
+            for image in images
+        ]
 
-    monkeypatch.setattr(paddle_ocr_worker, "_recognize_image", fake_recognize)
+    monkeypatch.setattr(paddle_ocr_worker, "_recognize_images", fake_recognize)
     session = paddle_ocr_worker._PersistentSession()
     common = {
         "mode": "recognize_batch",
@@ -121,3 +126,50 @@ def test_persistent_worker_reuses_loaded_engine_across_batches(
     assert second_result["ok"] is True
     assert calls["loads"] == 1
     assert [item[0] for item in calls["images"]] == [first.resolve(), second.resolve()]
+
+
+def test_worker_uses_one_predictor_call_for_a_bounded_batch(tmp_path: Path) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    calls: list[object] = []
+
+    class Result:
+        def __init__(self, text: str) -> None:
+            self.json = {
+                "res": {
+                    "rec_texts": [text],
+                    "rec_scores": [1.0],
+                    "rec_boxes": [[0, 0, 1, 1]],
+                }
+            }
+
+    class FakeOCR:
+        def predict(self, value: object) -> list[Result]:
+            calls.append(value)
+            assert isinstance(value, list)
+            return [Result(Path(item).name) for item in value]
+
+    result = paddle_ocr_worker._recognize_batch(
+        {
+            "images": [str(first), str(second)],
+            "detector_path": str(tmp_path),
+            "recognizer_path": str(tmp_path),
+            "device": "gpu:0",
+        },
+        ocr=FakeOCR(),
+        loaded_device="gpu:0",
+        loaded_versions={"paddleocr": "fixture"},
+    )
+
+    assert len(calls) == 1
+    assert calls[0] == [str(first.resolve()), str(second.resolve())]
+    assert [item["image_path"] for item in result["items"]] == [
+        str(first.resolve()),
+        str(second.resolve()),
+    ]
+    assert [item["lines"][0]["text"] for item in result["items"]] == [
+        "first.png",
+        "second.png",
+    ]
