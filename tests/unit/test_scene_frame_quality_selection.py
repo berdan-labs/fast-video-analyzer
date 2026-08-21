@@ -59,6 +59,43 @@ def test_periodic_candidates_enforce_strict_ceiling_and_cover_duration() -> None
     assert 95_000 - times[-1] <= 30_000
 
 
+def test_periodic_candidates_guard_a_container_tail_without_guessing_a_frame() -> None:
+    # A muxed duration can extend a few milliseconds beyond the final video
+    # frame (for example, because of audio padding).  The last safety request
+    # must stay measurable while preserving the <=30-second coverage bound.
+    times = periodic_candidate_times(18_000_002, interval_seconds=30, strict=True)
+    assert times[-1] == 17_999_752
+    assert times[-1] < 18_000_002
+    assert max(
+        right - left for left, right in zip(times, times[1:], strict=False)
+    ) <= 30_000
+    assert 18_000_002 - times[-1] == 250
+
+
+def test_periodic_candidates_allow_disabling_the_tail_guard_explicitly() -> None:
+    times = periodic_candidate_times(
+        30_001,
+        interval_seconds=30,
+        strict=True,
+        tail_guard_ms=0,
+    )
+    assert times == (0, 30_000)
+
+
+def test_periodic_tail_guard_keeps_short_intervals_sorted() -> None:
+    times = periodic_candidate_times(
+        1_000,
+        interval_seconds=0.1,
+        strict=True,
+        tail_guard_ms=250,
+    )
+    assert times == tuple(sorted(set(times)))
+    assert times[-1] == 750
+    assert max(
+        right - left for left, right in zip(times, times[1:], strict=False)
+    ) <= 100
+
+
 def test_merge_preserves_scene_and_periodic_reasons() -> None:
     safety = periodic_candidates(50_000, interval_seconds=25)
     scene = safety[1].__class__(

@@ -2099,7 +2099,11 @@ def _visual_survey_cache_identity(
     source_digest = source_sha256 or sha256_file(source)
     ffmpeg_version = _tool_version(shutil.which("ffmpeg")) or "unavailable"
     key = cache_key(
-        "visual-survey-v2",
+        # The periodic tail guard changes the requested safety schedule for
+        # media whose container duration extends past the final video frame.
+        # Version the receipt so a resume cannot restore a pre-fix endpoint
+        # candidate from an older run.
+        "visual-survey-v3-tail-guard",
         source_digest,
         duration_ms,
         round(interval_seconds, 6),
@@ -3511,7 +3515,9 @@ def _load_or_extract_visual_frames(
     # identical receipt into duplicate cache trees when a host is tuned or a
     # resume runs on a machine with a different CPU count.
     key = cache_key(
-        "visual-frames-v2",
+        # Requested schedules now exclude an unmeasurable container tail; do
+        # not restore a frame checkpoint created before that contract change.
+        "visual-frames-v3-tail-guard",
         source_digest,
         duration_ms,
         ordered_times,

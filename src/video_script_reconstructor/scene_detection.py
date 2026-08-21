@@ -16,6 +16,13 @@ _SHOWINFO = re.compile(
     r"(?:.*?\bs:\s*(?P<width>\d+)x(?P<height>\d+))?"
 )
 _TIME_BASE = re.compile(r"config in time_base:\s*(?P<base>\d+/\d+)")
+# Container duration can include a small audio/encoder tail after the final
+# decodable video frame.  A periodic request inside that tail is not an
+# approximate frame: it is an invalid request, and the exact extractor is
+# correct to refuse it.  Keep the safety sample one quarter-second inside the
+# declared duration so the strict cadence remains intact without guessing a
+# timestamp.  Structural/contextual candidates are measured independently.
+_PERIODIC_TAIL_GUARD_MS = 250
 
 
 @dataclass(frozen=True)
@@ -238,12 +245,22 @@ def periodic_candidate_times(
     *,
     interval_seconds: float = 30.0,
     strict: bool = True,
+    tail_guard_ms: int = _PERIODIC_TAIL_GUARD_MS,
 ) -> tuple[int, ...]:
-    """Return safety-sampling times while enforcing the strict 30-second ceiling."""
+    """Return safety-sampling times while enforcing the strict 30-second ceiling.
+
+    The declared container duration is not always the timestamp of a
+    decodable video frame (audio padding and muxer tails are common).  When
+    the final periodic point would fall inside ``tail_guard_ms`` of that
+    boundary, move only that point inward.  This preserves the temporal
+    coverage contract and never fabricates a measured frame timestamp.
+    """
     if duration_ms < 0:
         raise InputError("duration_ms cannot be negative")
     if interval_seconds <= 0:
         raise InputError("periodic safety interval must be positive")
+    if tail_guard_ms < 0:
+        raise InputError("periodic tail guard cannot be negative")
     if strict and interval_seconds > 30:
         raise InputError(
             "strict mode requires a periodic safety interval no greater than 30 seconds"
@@ -257,6 +274,14 @@ def periodic_candidate_times(
     # Add a near-tail sample only when the final uncovered span would exceed the interval.
     if duration_ms - times[-1] > interval_ms:
         times.append(max(0, duration_ms - 1))
+    if tail_guard_ms and duration_ms - times[-1] < tail_guard_ms:
+        guarded_tail = max(0, duration_ms - tail_guard_ms)
+        # Remove any prior samples that the inward move passes, then append
+        # the guarded point. This keeps the schedule sorted/unique even when
+        # a caller deliberately chooses an interval shorter than the guard.
+        times = [time_ms for time_ms in times if time_ms <= guarded_tail]
+        if not times or times[-1] != guarded_tail:
+            times.append(guarded_tail)
     return tuple(times)
 
 
@@ -265,6 +290,7 @@ def periodic_candidates(
     *,
     interval_seconds: float = 30.0,
     strict: bool = True,
+    tail_guard_ms: int = _PERIODIC_TAIL_GUARD_MS,
 ) -> tuple[SurveyCandidate, ...]:
     return tuple(
         SurveyCandidate(
@@ -278,7 +304,12 @@ def periodic_candidates(
             timestamp_source="requested-candidate",
         )
         for index, time_ms in enumerate(
-            periodic_candidate_times(duration_ms, interval_seconds=interval_seconds, strict=strict),
+            periodic_candidate_times(
+                duration_ms,
+                interval_seconds=interval_seconds,
+                strict=strict,
+                tail_guard_ms=tail_guard_ms,
+            ),
             1,
         )
     )
