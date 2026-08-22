@@ -18,9 +18,6 @@ intent.
 
 ### Changed
 
-- Sparse exact-seek frame extraction now uses the validated concat-demuxer
-  acceleration path for runs of eight or more requests (previously 16), while
-  retaining measured timing, pixel validation, and per-request fallback guards.
 - Frame deduplication now reuses canonical pixel identity before falling back
   to perceptual image comparison, reducing redundant image decoding while
   preserving OCR, sequence-role, and consequential-change protections.
