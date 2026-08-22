@@ -24,6 +24,9 @@ def test_paddle_ocr_adapter_preserves_lines_boxes_scores_and_uncertainty(
 ) -> None:
     image = tmp_path / "frame.png"
     image.write_bytes(b"fixture")
+    # Exercise the isolated protocol here; persistent-worker coverage is tested
+    # separately and this fixture intentionally mocks subprocess.run only.
+    monkeypatch.setenv("VSR_PADDLE_OCR_PERSISTENT_WORKER", "0")
     monkeypatch.setattr("video_script_reconstructor.paddle_ocr_adapter.verify_model", _verified)
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -61,6 +64,39 @@ def test_paddle_ocr_adapter_preserves_lines_boxes_scores_and_uncertainty(
     assert observation.uncertain_characters[0]["text"] == "Flag --safe"
     assert observation.engine == "pp-ocrv5-server"
     assert "pp-ocrv5-server-det-revision" in observation.engine_version
+
+
+def test_single_image_recognition_uses_persistent_request_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"fixture")
+    monkeypatch.setattr("video_script_reconstructor.paddle_ocr_adapter.verify_model", _verified)
+    adapter = PaddleOCRV5Adapter(worker_python=sys.executable)
+    calls: list[dict[str, object]] = []
+
+    def fake_invoke_batch(request: dict[str, object]) -> dict[str, object]:
+        calls.append(request)
+        return {
+            "ok": True,
+            "lines": [
+                {"text": "persistent", "confidence": 1.0, "bounding_box": [0, 0, 20, 10]}
+            ],
+            "package_versions": {"paddleocr": "fixture"},
+        }
+
+    monkeypatch.setattr(adapter, "_invoke_batch", fake_invoke_batch)
+    monkeypatch.setattr(
+        adapter,
+        "_invoke",
+        lambda _request: pytest.fail("single-image OCR bypassed the persistent route"),
+    )
+    observation = adapter.recognize(
+        image, frame_id="F000001", observation_id="O000001", language="eng"
+    )
+
+    assert observation.raw_engine_text == "persistent"
+    assert calls and calls[0]["mode"] == "recognize"
 
 
 def test_paddle_ocr_available_requires_both_verified_models(
