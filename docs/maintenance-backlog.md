@@ -5,12 +5,14 @@ system. Checked items are present on `main`; unchecked items require an owner
 decision, an external account, or a future focused change. Review this file
 weekly and update it through a pull request.
 
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-24
 
-Review note (2026-08-22): No open issues or pull requests; `main` CI, CodeQL,
-Platform Smoke, and Dependency Audit all passed on `d417d0c`; security and
-dependency alerts are clear; the five-hour performance qualification remains
-pending an authorized stronger host.
+Review note (2026-08-24): No open issues or pull requests; `main` CI and
+CodeQL passed after the exact-pixel deduplication optimization and its changelog
+entry (`0a11f75`, `b94be91`); security and dependency alerts remain clear; the
+five-hour performance qualification remains pending an authorized stronger
+host. Owner-only benchmark receipts and hardware fingerprints remain outside
+Git.
 
 ## Completed
 
