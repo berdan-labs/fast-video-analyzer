@@ -7,6 +7,7 @@ import os
 import queue
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,13 @@ RESULT_PREFIX = "VSR_RESULT\t"
 
 
 class _PersistentOCRWorker:
-    """Bounded newline protocol around one long-lived isolated OCR process."""
+    """Bounded newline protocol around one long-lived isolated OCR process.
+
+    Every response is attributed by echoing the request's ``request_id``; a
+    payload that does not carry the exact outstanding identifier is a stale
+    terminal leftover (a late result after a timeout, or an exit notice from
+    a replaced process) and is never consumed as a later request's answer.
+    """
 
     def __init__(self, adapter: PaddleOCRV5Adapter) -> None:
         self.adapter = adapter
@@ -27,9 +34,11 @@ class _PersistentOCRWorker:
         self.reader: threading.Thread | None = None
         self.lock = threading.RLock()
         self.request_number = 0
+        self.generation = 0
 
     def _read_stdout(self) -> None:
         process = self.process
+        generation = self.generation
         if process is None or process.stdout is None:
             return
         for raw_line in process.stdout:
@@ -38,7 +47,13 @@ class _PersistentOCRWorker:
             try:
                 payload = json.loads(raw_line[len(RESULT_PREFIX) :])
             except json.JSONDecodeError as exc:
-                self.responses.put({"ok": False, "error": f"malformed worker JSON: {exc}"})
+                self.responses.put(
+                    {
+                        "ok": False,
+                        "error": f"malformed worker JSON: {exc}",
+                        "_generation": generation,
+                    }
+                )
                 continue
             if isinstance(payload, dict):
                 self.responses.put(payload)
@@ -46,12 +61,24 @@ class _PersistentOCRWorker:
             {
                 "ok": False,
                 "error": "persistent PP-OCR worker exited before returning a result",
+                "_generation": generation,
             }
         )
 
     def _ensure_started(self, request: dict[str, Any]) -> None:
         if self.process is not None and self.process.poll() is None:
             return
+        # Starting or restarting a worker opens a new response generation.
+        # Drain leftovers from the previous generation up front; strict
+        # request-id matching in ``request`` remains the authoritative filter
+        # because the previous reader thread can still enqueue terminal
+        # payloads after this drain runs.
+        self.generation += 1
+        while True:
+            try:
+                self.responses.get_nowait()
+            except queue.Empty:
+                break
         environment = self.adapter._worker_environment()
         self.process = subprocess.Popen(
             [
@@ -83,12 +110,18 @@ class _PersistentOCRWorker:
             if process is None or process.stdin is None:
                 raise ValidationFailure("persistent PP-OCR worker did not expose stdin")
             self.request_number += 1
+            expected_request_id = str(self.request_number)
+            generation = self.generation
             request_with_id = dict(request)
-            request_with_id["request_id"] = str(self.request_number)
+            request_with_id["request_id"] = expected_request_id
             try:
                 process.stdin.write(json.dumps(request_with_id, ensure_ascii=False) + "\n")
                 process.stdin.flush()
-                payload = self.responses.get(timeout=timeout_seconds)
+                payload = self._await_response(
+                    expected_request_id,
+                    generation,
+                    deadline=time.monotonic() + timeout_seconds,
+                )
             except queue.Empty as exc:
                 self.close()
                 raise BlockedError(
@@ -97,6 +130,31 @@ class _PersistentOCRWorker:
             if not payload.get("ok"):
                 raise ValidationFailure(str(payload.get("error") or "persistent worker failed"))
             return payload
+
+    def _await_response(
+        self, expected_request_id: str, generation: int, *, deadline: float
+    ) -> dict[str, Any]:
+        """Return only the response attributable to this exact request.
+
+        Responses are consumed in arrival order, so anything already queued
+        when this request starts belongs to an earlier generation or an
+        abandoned request. The worker echoes ``request_id`` on every real
+        response; reader-thread diagnostics carry no id and are tagged with
+        the generation that produced them. A terminal diagnostic from this
+        generation means the request can never be answered and surfaces
+        immediately; everything else stale is discarded. The overall wait
+        stays bounded by the caller's original timeout.
+        """
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise queue.Empty
+            payload = self.responses.get(timeout=remaining)
+            if payload.get("request_id") == expected_request_id:
+                return payload
+            if "request_id" not in payload and payload.get("_generation") == generation:
+                return payload
 
     def close(self) -> None:
         with self.lock:
@@ -419,7 +477,9 @@ class PaddleOCRV5Adapter(OCRAdapter):
         for image, frame_id, observation_id, item in zip(
             images, frame_ids, observation_ids, items, strict=True
         ):
-            if not isinstance(item, dict) or item.get("image_path") != str(image.expanduser().resolve()):
+            if not isinstance(item, dict) or item.get("image_path") != str(
+                image.expanduser().resolve()
+            ):
                 raise ValidationFailure("PP-OCRv5 worker returned an out-of-order batch item")
             observations[frame_id] = self._observation_from_payload(
                 {**payload, **item},

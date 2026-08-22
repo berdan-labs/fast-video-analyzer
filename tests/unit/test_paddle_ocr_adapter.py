@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
+import queue
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from video_script_reconstructor import paddle_ocr_worker
-from video_script_reconstructor.paddle_ocr_adapter import PaddleOCRV5Adapter
+from video_script_reconstructor.errors import BlockedError, ValidationFailure
+from video_script_reconstructor.paddle_ocr_adapter import (
+    PaddleOCRV5Adapter,
+    _PersistentOCRWorker,
+)
 
 
 def _verified(name: str, _: Path | None) -> dict[str, object]:
@@ -79,9 +88,7 @@ def test_single_image_recognition_uses_persistent_request_route(
         calls.append(request)
         return {
             "ok": True,
-            "lines": [
-                {"text": "persistent", "confidence": 1.0, "bounding_box": [0, 0, 20, 10]}
-            ],
+            "lines": [{"text": "persistent", "confidence": 1.0, "bounding_box": [0, 0, 20, 10]}],
             "package_versions": {"paddleocr": "fixture"},
         }
 
@@ -236,3 +243,160 @@ def test_worker_uses_one_predictor_call_for_a_bounded_batch(tmp_path: Path) -> N
         "first.png",
         "second.png",
     ]
+
+
+class _StubPersistentAdapter:
+    """Provide only the surface ``_PersistentOCRWorker`` reads from its adapter."""
+
+    worker_python = sys.executable
+
+    def _worker_environment(self) -> dict[str, str]:
+        return os.environ.copy()
+
+
+class _BlockingStdout:
+    """Stdout stand-in that stays open (no exit sentinel) until closed."""
+
+    def __init__(self) -> None:
+        self._closed = threading.Event()
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        self._closed.wait(timeout=10)
+        raise StopIteration
+
+    def close(self) -> None:
+        self._closed.set()
+
+
+class _EofStdout:
+    """Stdout stand-in that is already at EOF (worker exited immediately)."""
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        raise StopIteration
+
+    def close(self) -> None:
+        return None
+
+
+class _FakePersistentProcess:
+    """Alive worker stand-in whose stdin answers each request synchronously."""
+
+    def __init__(self, responses: queue.Queue[dict[str, Any]], *, silent: bool = False) -> None:
+        self._responses = responses
+        self.silent = silent
+        self.requests: list[dict[str, Any]] = []
+        self.stdin = self
+        self.stdout: Any = _BlockingStdout()
+        self.stderr = None
+
+    def poll(self) -> int | None:
+        return None
+
+    def write(self, line: str) -> int:
+        request = json.loads(line)
+        assert isinstance(request, dict)
+        self.requests.append(request)
+        if not self.silent:
+            self._responses.put(
+                {
+                    "ok": True,
+                    "mode": request.get("mode"),
+                    "lines": [{"text": "FRESH", "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}],
+                    "device": "gpu:0",
+                    "package_versions": {},
+                    "request_id": request.get("request_id"),
+                }
+            )
+        return len(line)
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+def test_persistent_worker_does_not_consume_stale_payloads_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late result or exit notice from a dead worker cannot answer a new request.
+
+    Regression: responses were consumed in arrival order, so terminal payloads
+    left by a timed-out generation could be returned as the next request's
+    answer, attaching another image's OCR lines to the wrong observation.
+    """
+
+    worker = _PersistentOCRWorker(_StubPersistentAdapter())
+    processes: list[_FakePersistentProcess] = []
+    stale_result = {
+        "ok": True,
+        "mode": "recognize",
+        "lines": [{"text": "STALE", "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}],
+        "device": "gpu:0",
+        "package_versions": {},
+        "request_id": "1",
+    }
+    stale_exit = {
+        "ok": False,
+        "error": "persistent PP-OCR worker exited before returning a result",
+        "_generation": 1,
+    }
+
+    def fake_popen(*args: object, **kwargs: object) -> _FakePersistentProcess:
+        process = _FakePersistentProcess(worker.responses, silent=True)
+        if processes:
+            # Second start: emulate the previous generation's reader thread
+            # flushing its terminal payloads right after the replacement
+            # process starts, i.e. after the restart drain has already run.
+            worker.responses.put(stale_result)
+            worker.responses.put(stale_exit)
+            process.silent = False
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(
+        "video_script_reconstructor.paddle_ocr_adapter.subprocess.Popen", fake_popen
+    )
+
+    with pytest.raises(BlockedError, match="timed out"):
+        worker.request({"mode": "recognize"}, timeout_seconds=0.2)
+
+    payload = worker.request({"mode": "recognize"}, timeout_seconds=5)
+
+    assert payload["request_id"] == "2"
+    assert [line["text"] for line in payload["lines"]] == ["FRESH"]
+    assert len(processes) == 2
+    assert processes[1].requests == [
+        {"mode": "recognize", "request_id": "2"},
+    ]
+    worker.close()
+
+
+def test_persistent_worker_reports_current_generation_exit_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal exit notice from the live generation still fails fast."""
+
+    worker = _PersistentOCRWorker(_StubPersistentAdapter())
+
+    def fake_popen(*args: object, **kwargs: object) -> _FakePersistentProcess:
+        process = _FakePersistentProcess(worker.responses)
+        process.stdout = _EofStdout()  # the worker exits before answering
+        return process
+
+    monkeypatch.setattr(
+        "video_script_reconstructor.paddle_ocr_adapter.subprocess.Popen", fake_popen
+    )
+
+    with pytest.raises(ValidationFailure, match="exited before returning a result"):
+        worker.request({"mode": "recognize"}, timeout_seconds=5)
+    worker.close()
