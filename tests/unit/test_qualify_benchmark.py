@@ -95,6 +95,14 @@ def test_resource_budgets_fail_closed() -> None:
     assert "performance_summary.output_bytes exceeds policy budget" in reasons
 
 
+def test_resource_budgets_reject_missing_measurements() -> None:
+    module = _module()
+    policy = _policy() | {"max_peak_rss_bytes": 1000, "max_output_bytes": 1000}
+    reasons = module.evaluate_report(_report(), policy)
+    assert "missing performance_summary.peak_rss_bytes" in reasons
+    assert "missing performance_summary.output_bytes" in reasons
+
+
 def test_contract_mismatch_and_warm_cache_are_rejected() -> None:
     module = _module()
     report = _report()
