@@ -34,6 +34,8 @@ REQUIRED_POLICY_KEYS = {
 OPTIONAL_POLICY_KEYS = {
     "minimum_report_count",
     "required_runtime_fingerprint_fields",
+    "max_peak_rss_bytes",
+    "max_output_bytes",
 }
 REQUIRED_RUNTIME_CACHE_FLAGS = (
     "VSR_DISABLE_ASR_SHARED_CACHE",
@@ -110,6 +112,9 @@ def validate_policy(policy: Mapping[str, Any]) -> list[str]:
             errors.append(
                 "required_runtime_fingerprint_fields must be a list of unique non-empty strings"
             )
+    for key in ("max_peak_rss_bytes", "max_output_bytes"):
+        if key in policy and (not _is_number(policy[key]) or float(policy[key]) < 0):
+            errors.append(f"{key} must be a non-negative number")
     return errors
 
 
@@ -180,6 +185,25 @@ def evaluate_report(report: Mapping[str, Any], policy: Mapping[str, Any]) -> lis
             float(p95) <= float(policy["max_p95_seconds"]),
             "timing_summary.p95_seconds exceeds policy target",
         )
+    performance = report.get("performance_summary")
+    if not isinstance(performance, Mapping):
+        performance = {}
+    if "max_peak_rss_bytes" in policy:
+        peak_rss = performance.get("peak_rss_bytes")
+        require(_is_number(peak_rss), "missing performance_summary.peak_rss_bytes")
+        if _is_number(peak_rss):
+            require(
+                float(peak_rss) <= float(policy["max_peak_rss_bytes"]),
+                "performance_summary.peak_rss_bytes exceeds policy budget",
+            )
+    if "max_output_bytes" in policy:
+        output_bytes = performance.get("output_bytes")
+        require(_is_number(output_bytes), "missing performance_summary.output_bytes")
+        if _is_number(output_bytes):
+            require(
+                float(output_bytes) <= float(policy["max_output_bytes"]),
+                "performance_summary.output_bytes exceeds policy budget",
+            )
     return reasons
 
 
