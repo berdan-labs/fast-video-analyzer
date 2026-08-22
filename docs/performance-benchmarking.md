@@ -88,7 +88,25 @@ system, hardware profile, cold/warm state, corpus hash, run configuration, and
 output hash beside the raw report in the owner-controlled performance
 directory. The benchmark report exposes wall time, stage timings, whether
 visual survey overlapped ASR, peak RSS, output bytes, file count, validation
-source, and cache reuse. Stage times may overlap; their sum is not wall time.
+source, and cache reuse. It also records a sanitized runtime block (no GPU
+serials, UUIDs, usernames, or host paths) and stable SHA-256 digests for the
+transcript, frame, OCR, script-block, timeline, visual-event, and evidence
+metadata lanes. `quality_contract_sha256` combines those lane digests with the
+measured media duration and model-summary digest so two named-hardware runs can
+be compared without publishing their raw project data. Stage times may
+overlap; their sum is not wall time.
+
+These fields are qualification evidence, not an SLO declaration. A hardware
+tier may be called qualified only after owner-local, cache-cold, end-to-end
+receipts cover the required duration and content classes, finish inside the
+stated wall-time budget, pass validation, and match the accepted quality
+contract. Keep the media, reports, profiler traces, host inventory, and exact
+timings outside Git. Commit only the reusable harness, manifest rules,
+generated fixtures, tests, and public methodology.
+
+Pipeline benchmark reports use schema `1.1` and `report_kind` set to
+`pipeline-benchmark`; ASR chunk sweeps use the same schema with
+`report_kind=asr-chunk-sweep`.
 
 ## Budgets and comparison rules
 

@@ -31,6 +31,79 @@ def test_timing_summary_is_conservative_for_small_samples() -> None:
     }
 
 
+def test_runtime_summary_sanitizes_gpu_and_revision_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _benchmark_module()
+
+    def command_output(name: str, *_args: str) -> str | None:
+        return {
+            "git": "0123456789abcdef0123456789abcdef01234567",
+            "ffmpeg": "ffmpeg version 7.1\nCopyright owner-local path must not appear",
+            "nvidia-smi": "NVIDIA GeForce RTX 3060, 12288, 560.01",
+        }.get(name)
+
+    monkeypatch.setattr(module, "_command_output", command_output)
+    monkeypatch.setattr(module, "_package_versions", lambda: {"paddleocr": "3.7.0"})
+    summary = module._runtime_summary()
+
+    assert summary["git_revision"] == "0123456789ab"
+    assert summary["ffmpeg_version"] == "ffmpeg version 7.1"
+    assert summary["gpus"] == [
+        {
+            "name": "NVIDIA GeForce RTX 3060",
+            "memory_total_mib": 12288,
+            "driver_version": "560.01",
+        }
+    ]
+    assert summary["package_versions"] == {"paddleocr": "3.7.0"}
+    assert "uuid" not in json.dumps(summary).casefold()
+
+
+def test_runtime_summary_degrades_cleanly_without_a_gpu() -> None:
+    module = _benchmark_module()
+    assert module._nvidia_gpus(None) == []
+    assert module._nvidia_gpus("malformed") == []
+
+
+def test_quality_summary_hashes_only_declared_stable_lanes(tmp_path: Path) -> None:
+    module = _benchmark_module()
+    state = tmp_path / ".state"
+    state.mkdir()
+    canonical = {
+        "generated_at_utc": "first",
+        "media": {"duration_ms": 18_000_000},
+        "transcript_segments": [
+            {
+                "substantive": True,
+                "normalized_text": "Exact text",
+                "words": [{"text": "Exact"}, {"text": "text"}],
+            }
+        ],
+        "frames": [{"frame_id": "F000001", "sha256": "a" * 64}],
+        "ocr_observations": [{"frame_id": "F000001", "text": "42"}],
+        "script_blocks": [{"block_id": "B000001", "text": "Exact text"}],
+        "timeline": [{"start_ms": 0, "end_ms": 1000}],
+        "visual_events": [{"event_id": "V000001"}],
+        "evidence_image_metadata": [{"frame_id": "F000001"}],
+        "tools_models_summary": {"ocr": "PP-OCRv5-server"},
+        "audit": {"blocking_failures": []},
+    }
+    canonical_path = state / "canonical-project.json"
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+    first = module._quality_summary(tmp_path)
+
+    canonical["generated_at_utc"] = "second"
+    canonical["unrelated_runtime_telemetry"] = {"elapsed_ms": 999}
+    canonical_path.write_text(json.dumps(canonical, sort_keys=True), encoding="utf-8")
+    second = module._quality_summary(tmp_path)
+
+    assert first["media_duration_ms"] == 18_000_000
+    assert first["lane_item_counts"]["ocr_observations"] == 1
+    assert first["quality_contract_sha256"] == second["quality_contract_sha256"]
+    assert first["lane_sha256"] == second["lane_sha256"]
+
+
 def test_benchmark_repeat_reuses_warm_output_and_reports_iterations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -63,6 +136,8 @@ def test_benchmark_repeat_reuses_warm_output_and_reports_iterations(
         repeat=3,
     )
     assert calls == [(tmp_path / "warm", True)] * 3
+    assert report["schema_version"] == "1.1"
+    assert report["report_kind"] == "pipeline-benchmark"
     assert report["timing_summary"]["count"] == 3
     assert len(report["iterations"]) == 3
     assert report["validation_valid"] is True
