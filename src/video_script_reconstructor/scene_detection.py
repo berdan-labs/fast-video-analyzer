@@ -550,7 +550,11 @@ def build_combined_survey_frame_command(
         f"[0:v:{video_stream_index}]split=4[hard_input][adaptive_input][periodic_input][hard_dummy_input];"
         f"[hard_input]select=gt(scene\\,{scene_threshold:.8g}),showinfo@hard[hard_measured];"
         f"[hard_dummy_input]trim=start_frame=0:end_frame=1,setpts=PTS-STARTPTS[hard_dummy];"
-        f"[hard_measured]setpts=PTS-STARTPTS[hard_reset];"
+        # Keep the sentinel's PTS distinct from the first measured cut. FFmpeg
+        # 7.1's VFR image2 muxer drops equal-PTS frames, while newer builds
+        # preserve them; a one-clock-tick offset retains both without changing
+        # the measured candidate timestamps (showinfo is upstream).
+        f"[hard_measured]setpts=PTS-STARTPTS+1/TB[hard_reset];"
         f"[hard_dummy][hard_reset]concat=n=2:v=1:a=0[hard_output];"
         f"[adaptive_input]fps={adaptive_sample_fps:.8g},"
         f"select=gt(scene\\,{adaptive_threshold:.8g}),showinfo@adaptive,nullsink;"
