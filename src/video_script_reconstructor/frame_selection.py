@@ -489,28 +489,9 @@ def select_frames(
                 # adjacent candidates for expensive pixel-level deduplication.
                 if abs(candidate.actual_ms - prior.candidate.actual_ms) > 120_000:
                     continue
-                candidate_hash = hashes.get(candidate.frame_id) or candidate.perceptual_hash
-                if candidate_hash is None:
-                    candidate_hash = perceptual_dhash(candidate.path)
-                    hashes[candidate.frame_id] = candidate_hash
-                prior_hash = hashes.get(prior.candidate.frame_id) or prior.candidate.perceptual_hash
-                if prior_hash is None:
-                    prior_hash = perceptual_dhash(prior.candidate.path)
-                    hashes[prior.candidate.frame_id] = prior_hash
-                duplicate_hamming = perceptual_hamming(candidate_hash, prior_hash)
-                if duplicate_hamming > 5:
-                    # The strict fast-path threshold is retained for exact
-                    # duplicates.  Low-importance context gets a bounded
-                    # relaxed comparison below to absorb codec jitter.
-                    if not importance_aware:
-                        continue
-                    if duplicate_hamming > NEAR_DUPLICATE_HAMMING_THRESHOLD:
-                        continue
-                # The pipeline already computes a canonical normalized pixel
-                # hash while creating each evidence image. Exact equality is a
-                # safe fast path: it avoids reopening/decoding two large PNGs
-                # for the common static-slide case, while still protecting
-                # OCR changes, sequence roles, and consequential events.
+                # Canonical pixel hashes are computed while the evidence PNG
+                # is decoded. Equal hashes prove pixel identity, so take the
+                # exact duplicate path before computing perceptual hashes.
                 if (
                     candidate.pixel_hash is not None
                     and prior.candidate.pixel_hash is not None
@@ -539,8 +520,26 @@ def select_frames(
                     if duplicate:
                         duplicate_representative = prior.candidate
                         duplicate_reason = "exact_pixel_hash"
+                        duplicate_hamming = 0
                         break
                     continue
+                candidate_hash = hashes.get(candidate.frame_id) or candidate.perceptual_hash
+                if candidate_hash is None:
+                    candidate_hash = perceptual_dhash(candidate.path)
+                    hashes[candidate.frame_id] = candidate_hash
+                prior_hash = hashes.get(prior.candidate.frame_id) or prior.candidate.perceptual_hash
+                if prior_hash is None:
+                    prior_hash = perceptual_dhash(prior.candidate.path)
+                    hashes[prior.candidate.frame_id] = prior_hash
+                duplicate_hamming = perceptual_hamming(candidate_hash, prior_hash)
+                if duplicate_hamming > 5:
+                    # The strict fast-path threshold is retained for exact
+                    # duplicates.  Low-importance context gets a bounded
+                    # relaxed comparison below to absorb codec jitter.
+                    if not importance_aware:
+                        continue
+                    if duplicate_hamming > NEAR_DUPLICATE_HAMMING_THRESHOLD:
+                        continue
                 decision = deduplication_decision(
                     prior.candidate.path,
                     candidate.path,
@@ -661,9 +660,6 @@ def select_frames(
             score=score,
             protected_reasons=protected_reasons,
         )
-        if candidate.frame_id not in hashes:
-            hashes[candidate.frame_id] = candidate.perceptual_hash or perceptual_dhash(candidate.path)
-
     if safety_limit is not None and len(selected) > safety_limit:
         pre_safety_selected = tuple(selected)
         required = [
