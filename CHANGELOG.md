@@ -18,6 +18,8 @@ intent.
 
 ### Changed
 
+- Single-image PP-OCRv5 recognition now uses the existing persistent worker
+  route, while retaining the isolated-worker fallback and explicit opt-out.
 - Frame deduplication now reuses canonical pixel identity before falling back
   to perceptual image comparison, reducing redundant image decoding while
   preserving OCR, sequence-role, and consequential-change protections.
