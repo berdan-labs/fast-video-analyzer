@@ -198,6 +198,14 @@ the effective `VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES` cap (default 1024)
 because a five-hour survey can exceed it; raise it explicitly (bounded at
 4096) rather than letting the cap silently truncate the treatment.
 
+A companion compute-type matrix keeps the same three-arm shape on the same
+named host and corpus: arm A remains the CUDA `float16` control, arm B applies
+`VSR_FASTER_WHISPER_COMPUTE_TYPE=int8_float16` as the treatment, and arm C runs
+plain `int8` as a secondary treatment. Every compute-type arm must pass the
+same correctness, ASR-contention, RSS/output-byte, and timing gates above; no
+compute-type result is recorded yet, and no precision default changes without
+those owner-local receipts.
+
 Correctness gates, applied to every iteration of every arm before any timing
 is considered:
 

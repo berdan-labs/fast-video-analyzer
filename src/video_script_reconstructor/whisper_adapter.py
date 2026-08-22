@@ -270,6 +270,10 @@ class FasterWhisperAdapter(ASRAdapter):
             f"{self.backend_name}|{self.model_name_or_path}",
             f"vad={bool(effective_vad)}|condition_on_previous_text={bool(effective_context)}",
             f"inference={self.inference_mode}|batch={self.batch_size}",
+            # The requested compute type is part of run/checkpoint identity so
+            # an explicit VSR_FASTER_WHISPER_COMPUTE_TYPE experiment can never
+            # reuse evidence produced under a different precision.
+            f"compute_type={self.compute_type}",
         ]
         if self.model_revision is not None:
             identity_tokens.append(f"revision={self.model_revision}")

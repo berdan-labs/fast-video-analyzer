@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 from video_script_reconstructor.pipeline import (
     _asr_cpu_threads,
     _auto_asr_adapters,
+    _faster_whisper_compute_type,
     _faster_whisper_model_identity,
     _faster_whisper_num_workers,
 )
@@ -170,6 +171,63 @@ def test_faster_whisper_worker_policy_is_vram_guarded_and_overridable(monkeypatc
     assert _faster_whisper_num_workers(duration_ms=600_000) == 8
     monkeypatch.setenv("VSR_FASTER_WHISPER_NUM_WORKERS", "invalid")
     assert _faster_whisper_num_workers(duration_ms=120_000) == 2
+
+
+def test_faster_whisper_compute_type_policy_follows_host_device(monkeypatch) -> None:
+    monkeypatch.delenv("VSR_FASTER_WHISPER_COMPUTE_TYPE", raising=False)
+    monkeypatch.setattr("video_script_reconstructor.pipeline.shutil.which", lambda name: None)
+    assert _faster_whisper_compute_type() == "int8"
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline.shutil.which",
+        lambda name: "nvidia-smi.exe" if name == "nvidia-smi" else None,
+    )
+    assert _faster_whisper_compute_type() == "float16"
+
+
+def test_faster_whisper_compute_type_override_is_explicit_and_supported(monkeypatch) -> None:
+    monkeypatch.setattr("video_script_reconstructor.pipeline.shutil.which", lambda name: None)
+    for supported in ("int8_float16", "int8_bfloat16", "Default"):
+        monkeypatch.setenv("VSR_FASTER_WHISPER_COMPUTE_TYPE", supported)
+        assert _faster_whisper_compute_type() == supported.casefold()
+
+
+def test_faster_whisper_compute_type_invalid_override_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr("video_script_reconstructor.pipeline.shutil.which", lambda name: None)
+    monkeypatch.setenv("VSR_FASTER_WHISPER_COMPUTE_TYPE", "bfloat16")
+    assert _faster_whisper_compute_type() == "int8"
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline.shutil.which",
+        lambda name: "nvidia-smi.exe" if name == "nvidia-smi" else None,
+    )
+    monkeypatch.setenv("VSR_FASTER_WHISPER_COMPUTE_TYPE", "fp16")
+    assert _faster_whisper_compute_type() == "float16"
+
+
+def test_auto_whisper_applies_compute_type_override_at_construction(monkeypatch) -> None:
+    monkeypatch.setenv("VSR_FASTER_WHISPER_COMPUTE_TYPE", "int8_float16")
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline._developer_worker_path",
+        lambda *args, **kwargs: Path("missing-worker.exe"),
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.pipeline.importlib.util.find_spec",
+        lambda name: SimpleNamespace() if name == "faster_whisper" else None,
+    )
+    monkeypatch.setattr("video_script_reconstructor.pipeline.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "video_script_reconstructor.model_store.verify_model",
+        lambda name: {
+            "offline_ready": name == "faster-whisper-large-v3",
+            "directory": "C:/models/large-v3",
+        },
+    )
+
+    adapters = _auto_asr_adapters(language="fil", compare_candidates=False)
+
+    assert len(adapters) == 1
+    assert isinstance(adapters[0], FasterWhisperAdapter)
+    assert adapters[0].device == "cpu"
+    assert adapters[0].compute_type == "int8_float16"
 
 
 def test_auto_whisper_batched_mode_is_explicitly_configurable(monkeypatch) -> None:

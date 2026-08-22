@@ -33,6 +33,13 @@ On CPU-only hosts, automatic faster-whisper construction uses a bounded physical
 The local RTX 3060 benchmark produced identical transcript/timestamp digests with one or two workers: 120 seconds measured 14.082 s versus 12.700 s, while the 600-second direct decode measured 81.932 s versus 80.271 s and the complete pipeline measured 81.559 s versus 90.905 s. The duration guard intentionally keeps long-form unattended runs at one worker because end-to-end critical-path timing, not an isolated decoder sample, is the authority.
 Standard faster-whisper decoding remains the accuracy-first default. For a measured throughput experiment, set `VSR_FASTER_WHISPER_BATCHED=1` (or `VSR_FASTER_WHISPER_INFERENCE_MODE=batched`) and optionally `VSR_FASTER_WHISPER_BATCH_SIZE` between 1 and 64. BatchedInferencePipeline shares the loaded weights, but its scheduling can change segment boundaries; the adapter records `inference_mode`, `batch_size`, and an explicit review warning, and checkpoint identity separates batched from standard output. Do not enable it silently in a strict run.
 On the local FC101 Filipino benchmark (120 seconds, large-v3 CUDA/float16, batch size 4), standard decoding took 13.107 s and batched decoding 4.844 s (2.706x), while word counts were 248 and 249 and the text boundaries differed. Treat this as a throughput/review trade-off, not an accuracy claim; remeasure on representative media and keep standard mode for unattended strict output.
+`VSR_FASTER_WHISPER_COMPUTE_TYPE` is an explicit owner-controlled throughput
+experiment for automatic faster-whisper construction. It accepts `default`,
+`float16`, `int8`, `int8_float16`, or `int8_bfloat16` case-insensitively; any
+other value logs a warning and falls back to the host policy, while leaving the
+variable unset keeps CUDA float16/CPU int8. The resolved value participates in
+cache/checkpoint identity. No default is changed, and quality must be validated
+on representative media before the override is used.
 When no language is supplied, checkpointed Whisper chunks retain independent
 per-chunk language detection by default. An explicit `VSR_ASR_LANGUAGE_HINT=1`
 opt-in carries the first chunk's language forward only after a high-confidence
