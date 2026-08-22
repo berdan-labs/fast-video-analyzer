@@ -1497,6 +1497,36 @@ def _faster_whisper_inference_options() -> dict[str, Any]:
     return {"inference_mode": mode, "batch_size": batch_size}
 
 
+_FASTER_WHISPER_COMPUTE_TYPES = frozenset(
+    {"default", "float16", "int8", "int8_float16", "int8_bfloat16"}
+)
+
+
+def _faster_whisper_compute_type() -> str:
+    """Choose the CTranslate2 compute type for automatically resolved Whisper.
+
+    CUDA hosts load float16 weights and CPU-only hosts stay on int8 so the
+    automatic policy remains auditable without an explicit decision.
+    ``VSR_FASTER_WHISPER_COMPUTE_TYPE`` mirrors the model-dependent test knob
+    and opts into one of the supported faster-whisper values; anything else
+    fails closed to the host policy instead of surprising a run with an
+    untested precision mode.
+    """
+
+    fallback = "float16" if shutil.which("nvidia-smi") else "int8"
+    override = os.environ.get("VSR_FASTER_WHISPER_COMPUTE_TYPE", "").strip().casefold()
+    if not override:
+        return fallback
+    if override not in _FASTER_WHISPER_COMPUTE_TYPES:
+        LOGGER.warning(
+            "Ignoring unsupported VSR_FASTER_WHISPER_COMPUTE_TYPE=%r; using %s",
+            override,
+            fallback,
+        )
+        return fallback
+    return override
+
+
 def _auto_asr_adapters(
     *,
     language: str | None = None,
@@ -1552,7 +1582,7 @@ def _auto_asr_adapters(
                     model_revision=model_revision,
                     model_signature=model_signature,
                     device="cuda" if shutil.which("nvidia-smi") else "cpu",
-                    compute_type="float16" if shutil.which("nvidia-smi") else "int8",
+                    compute_type=_faster_whisper_compute_type(),
                     cpu_threads=_asr_cpu_threads(),
                     num_workers=_faster_whisper_num_workers(duration_ms=duration_ms),
                     **_faster_whisper_inference_options(),
@@ -1678,7 +1708,7 @@ def _auto_asr_adapters(
                 model_revision=model_revision,
                 model_signature=model_signature,
                 device="cuda" if shutil.which("nvidia-smi") else "cpu",
-                compute_type="float16" if shutil.which("nvidia-smi") else "int8",
+                compute_type=_faster_whisper_compute_type(),
                 cpu_threads=_asr_cpu_threads(),
                 num_workers=_faster_whisper_num_workers(duration_ms=duration_ms),
                 **_faster_whisper_inference_options(),

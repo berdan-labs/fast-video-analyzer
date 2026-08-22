@@ -337,6 +337,14 @@ def test_faster_whisper_model_signature_changes_checkpoint_identity(tmp_path: Pa
     assert checkpoint_cache_key(one, **common) != checkpoint_cache_key(two, **common)
 
 
+def test_faster_whisper_compute_type_changes_cache_identity() -> None:
+    one = FasterWhisperAdapter(model="local", compute_type="float16")
+    two = FasterWhisperAdapter(model="local", compute_type="int8_float16")
+    assert one.cache_identity != two.cache_identity
+    assert "compute_type=float16" in one.cache_identity
+    assert "compute_type=int8_float16" in two.cache_identity
+
+
 def test_checkpointed_full_media_whisper_request_skips_intermediate_wav(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
