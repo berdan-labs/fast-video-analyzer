@@ -5,14 +5,17 @@ system. Checked items are present on `main`; unchecked items require an owner
 decision, an external account, or a future focused change. Review this file
 weekly and update it through a pull request.
 
-Last reviewed: 2026-08-24
+Last reviewed: 2026-08-22
 
-Review note (2026-08-24): No open issues or pull requests; `main` CI and
-CodeQL passed after the exact-pixel deduplication optimization and its changelog
-entry (`0a11f75`, `b94be91`); security and dependency alerts remain clear; the
-five-hour performance qualification remains pending an authorized stronger
-host. Owner-only benchmark receipts and hardware fingerprints remain outside
-Git.
+Review note (2026-08-22): No open issues or pull requests; `main` CI and
+CodeQL passed after the persistent single-image OCR routing fix, owner-only
+design-draft boundary, and their changelog/maintenance follow-ups (`d91f65e`,
+`a3eb518`, `d9760e5`). The sparse-seek threshold experiment was reverted after
+broader corpus evidence showed no general speed benefit; ASR/visual overlap and
+semantic-streaming proposals were also rejected on measured regression or
+shared-state safety grounds. Security and dependency alerts remain clear; the
+five-hour qualification is still pending an authorized stronger host.
+Owner-only receipts, media, and hardware fingerprints remain outside Git.
 
 ## Completed
 
