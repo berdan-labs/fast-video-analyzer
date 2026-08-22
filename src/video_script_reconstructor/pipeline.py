@@ -3864,6 +3864,8 @@ def _load_or_extract_visual_frames(
         if on_frame is None:
             return
         requested_ms = getattr(frame, "requested_ms", None)
+        if not isinstance(requested_ms, int):
+            return
         index = requested_indexes.get(requested_ms)
         if index is None or index in published_indexes:
             return
@@ -5093,10 +5095,11 @@ def _survey_candidate_point(candidate: Any, *, duration_ms: int) -> int | None:
 
     requested = getattr(candidate, "requested_ms", None)
     actual = getattr(candidate, "actual_ms", None)
-    if actual is None and requested is None:
+    point_value = actual if actual is not None else requested
+    if point_value is None:
         return None
     try:
-        point = int(actual if actual is not None else requested)
+        point = int(point_value)
     except (TypeError, ValueError):
         return None
     return min(max(point, 0), max(duration_ms - 1, 0))
@@ -5160,21 +5163,23 @@ def _prefetch_transcript_independent_visual_frames(
         shared_frames,
         duration_ms=duration_ms,
     )
-    result = {
-        "requested_count": len(times),
-        "prefetched_frame_count": 0,
-        "prefetched_batch_count": 0,
-        "prefetch_failed_batch_count": 0,
-        "prefetch_elapsed_seconds": 0.0,
-        "prefetch_error": None,
-    }
+    prefetched_frame_count = 0
+    prefetched_batch_count = 0
+    prefetch_failed_batch_count = 0
+    first_error: str | None = None
     if not times or _visual_frame_cache_limit() <= 0:
-        return result
+        return {
+            "requested_count": len(times),
+            "prefetched_frame_count": prefetched_frame_count,
+            "prefetched_batch_count": prefetched_batch_count,
+            "prefetch_failed_batch_count": prefetch_failed_batch_count,
+            "prefetch_elapsed_seconds": 0.0,
+            "prefetch_error": first_error,
+        }
 
     started = time.perf_counter()
     warmup_root = frame_output_dir / "warmup"
     batch_size = _parallel_visual_warmup_batch_size()
-    first_error: str | None = None
     for batch_index, start in enumerate(range(0, len(times), batch_size)):
         batch_times = times[start : start + batch_size]
         output_dir = warmup_root / f"batch-{batch_index:06d}"
@@ -5192,7 +5197,7 @@ def _prefetch_transcript_independent_visual_frames(
                 worker_pool=None,
             )
         except Exception as exc:  # pragma: no cover - FFmpeg/filesystem specific
-            result["prefetch_failed_batch_count"] += 1
+            prefetch_failed_batch_count += 1
             if first_error is None:
                 first_error = str(exc)
             LOGGER.warning(
@@ -5201,13 +5206,18 @@ def _prefetch_transcript_independent_visual_frames(
                 exc_info=True,
             )
         else:
-            result["prefetched_frame_count"] += len(extracted)
-            result["prefetched_batch_count"] += 1
+            prefetched_frame_count += len(extracted)
+            prefetched_batch_count += 1
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
-    result["prefetch_elapsed_seconds"] = round(time.perf_counter() - started, 6)
-    result["prefetch_error"] = first_error
-    return result
+    return {
+        "requested_count": len(times),
+        "prefetched_frame_count": prefetched_frame_count,
+        "prefetched_batch_count": prefetched_batch_count,
+        "prefetch_failed_batch_count": prefetch_failed_batch_count,
+        "prefetch_elapsed_seconds": round(time.perf_counter() - started, 6),
+        "prefetch_error": first_error,
+    }
 
 
 def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
