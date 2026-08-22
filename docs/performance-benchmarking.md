@@ -121,7 +121,9 @@ outside Git and evaluate the resulting cold reports:
 ```bash
 uv run python scripts/qualify_benchmark.py \
   --policy ../fast-video-analyzer-owner/qualification/dense-five-hour.json \
-  --report ../fast-video-analyzer-owner/qualification/run-001.json
+  --report ../fast-video-analyzer-owner/qualification/run-001.json \
+  --report ../fast-video-analyzer-owner/qualification/run-002.json \
+  --report ../fast-video-analyzer-owner/qualification/run-003.json
 ```
 
 The evaluator exits `0` only when the policy schema, workload ID, report schema,
@@ -131,6 +133,19 @@ missing evidence; no absent field defaults to success. The committed
 `tests/qualification_policy.example.json` is intentionally impossible to
 satisfy and is a schema example, not a performance claim. Keep real policies,
 reports, media, and host receipts owner-local.
+
+Two optional policy keys harden multi-report qualification without changing any
+existing policy:
+
+- `minimum_report_count` (default `1`) must be a positive integer. Evaluation
+  fails closed when fewer report files are supplied than the policy demands.
+- `required_runtime_fingerprint_fields` (default `[]`) lists `report.runtime`
+  field names that must exist in every supplied report and be identical across
+  all of them (for example sanitized host platform or CPU-model fields).
+
+A real three-round hardware policy — one cold report per interleaved round —
+should set `minimum_report_count` to `3`, so a single lucky run can never
+qualify a host on its own.
 
 ## Five-hour end-to-end qualification experiment
 

@@ -115,3 +115,108 @@ def test_policy_rejects_missing_required_key(key: str) -> None:
     policy = _policy()
     del policy[key]
     assert any(key in error for error in module.validate_policy(policy))
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, "3", True, None])
+def test_policy_rejects_invalid_minimum_report_count(value: Any) -> None:
+    module = _module()
+    policy = _policy() | {"minimum_report_count": value}
+    errors = module.validate_policy(policy)
+    assert any("minimum_report_count" in error for error in errors)
+
+
+def test_policy_accepts_valid_optional_keys() -> None:
+    module = _module()
+    policy = _policy() | {
+        "minimum_report_count": 3,
+        "required_runtime_fingerprint_fields": ["os_platform", "python_version"],
+    }
+    assert module.validate_policy(policy) == []
+
+
+@pytest.mark.parametrize("value", ["os_platform", [""], [1], ["a", "a"], {"a": 1}])
+def test_policy_rejects_invalid_fingerprint_fields(value: Any) -> None:
+    module = _module()
+    policy = _policy() | {"required_runtime_fingerprint_fields": value}
+    errors = module.validate_policy(policy)
+    assert any("required_runtime_fingerprint_fields" in error for error in errors)
+
+
+def test_too_few_reports_are_rejected(tmp_path: Path) -> None:
+    module = _module()
+    policy = _policy() | {"minimum_report_count": 3}
+    assert module.validate_policy(policy) == []
+    report_paths = []
+    for index in range(2):
+        path = tmp_path / f"report-{index}.json"
+        path.write_text(json.dumps(_report()), encoding="utf-8")
+        report_paths.append(path)
+    code, result = module.evaluate_files(_policy_file(tmp_path, policy), tuple(report_paths))
+    assert code == 5
+    assert result["verdict"] == "rejected"
+    assert any(
+        "at least 3" in reason and "got 2" in reason for reason in result["reasons"]
+    )
+
+
+def test_inconsistent_fingerprint_is_rejected(tmp_path: Path) -> None:
+    module = _module()
+    policy = _policy() | {"required_runtime_fingerprint_fields": ["os_platform"]}
+    assert module.validate_policy(policy) == []
+    first = _report()
+    first["runtime"]["os_platform"] = "windows-11"
+    second = _report()
+    second["runtime"]["os_platform"] = "linux-6.8"
+    paths = []
+    for name, report in (("a.json", first), ("b.json", second)):
+        path = tmp_path / name
+        path.write_text(json.dumps(report), encoding="utf-8")
+        paths.append(path)
+    code, result = module.evaluate_files(_policy_file(tmp_path, policy), tuple(paths))
+    assert code == 5
+    assert result["verdict"] == "rejected"
+    assert any(
+        "runtime.os_platform is not identical across reports" in reason
+        for reason in result["reasons"]
+    )
+
+
+def test_missing_fingerprint_field_is_rejected(tmp_path: Path) -> None:
+    module = _module()
+    policy = _policy() | {"required_runtime_fingerprint_fields": ["os_platform"]}
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"report-{index}.json"
+        path.write_text(json.dumps(_report()), encoding="utf-8")
+        paths.append(path)
+    code, result = module.evaluate_files(_policy_file(tmp_path, policy), tuple(paths))
+    assert code == 5
+    assert result["verdict"] == "rejected"
+    assert any(
+        "runtime.os_platform missing from reports" in reason for reason in result["reasons"]
+    )
+
+
+def test_identical_fingerprints_qualify(tmp_path: Path) -> None:
+    module = _module()
+    policy = _policy() | {
+        "minimum_report_count": 2,
+        "required_runtime_fingerprint_fields": ["os_platform"],
+    }
+    assert module.validate_policy(policy) == []
+    paths = []
+    for index in range(2):
+        report = _report()
+        report["runtime"]["os_platform"] = "windows-11"
+        path = tmp_path / f"report-{index}.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        paths.append(path)
+    code, result = module.evaluate_files(_policy_file(tmp_path, policy), tuple(paths))
+    assert code == 0
+    assert result["verdict"] == "qualified"
+
+
+def _policy_file(tmp_path: Path, policy: dict[str, Any]) -> Path:
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+    return path

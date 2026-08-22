@@ -31,6 +31,10 @@ REQUIRED_POLICY_KEYS = {
     "max_elapsed_seconds",
     "max_p95_seconds",
 }
+OPTIONAL_POLICY_KEYS = {
+    "minimum_report_count",
+    "required_runtime_fingerprint_fields",
+}
 REQUIRED_RUNTIME_CACHE_FLAGS = (
     "VSR_DISABLE_ASR_SHARED_CACHE",
     "VSR_DISABLE_VISUAL_SHARED_CACHE",
@@ -59,7 +63,7 @@ def _is_hex_digest(value: Any) -> bool:
 def validate_policy(policy: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     missing = REQUIRED_POLICY_KEYS - set(policy)
-    unknown = set(policy) - REQUIRED_POLICY_KEYS
+    unknown = set(policy) - REQUIRED_POLICY_KEYS - OPTIONAL_POLICY_KEYS
     errors.extend(f"missing policy key: {key}" for key in sorted(missing))
     errors.extend(f"unknown policy key: {key}" for key in sorted(unknown))
     if errors:
@@ -92,6 +96,20 @@ def validate_policy(policy: Mapping[str, Any]) -> list[str]:
         or len(set(lanes)) != len(lanes)
     ):
         errors.append("required_lane_digests must be a non-empty list of unique strings")
+    if "minimum_report_count" in policy:
+        count = policy["minimum_report_count"]
+        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+            errors.append("minimum_report_count must be a positive integer")
+    if "required_runtime_fingerprint_fields" in policy:
+        fields = policy["required_runtime_fingerprint_fields"]
+        if (
+            not isinstance(fields, list)
+            or any(not isinstance(field, str) or not field.strip() for field in fields)
+            or len(set(fields)) != len(fields)
+        ):
+            errors.append(
+                "required_runtime_fingerprint_fields must be a list of unique non-empty strings"
+            )
     return errors
 
 
@@ -165,6 +183,33 @@ def evaluate_report(report: Mapping[str, Any], policy: Mapping[str, Any]) -> lis
     return reasons
 
 
+def _fingerprint_reasons(
+    parsed_reports: Sequence[tuple[str, Mapping[str, Any]]],
+    fields: Sequence[str],
+) -> list[str]:
+    """Return reasons for runtime fingerprint fields that are missing or differ."""
+
+    if not fields or not parsed_reports:
+        return []
+    reasons: list[str] = []
+    for field in fields:
+        values: list[Any] = []
+        missing: list[str] = []
+        for name, report in parsed_reports:
+            runtime = report.get("runtime")
+            if not isinstance(runtime, Mapping) or field not in runtime:
+                missing.append(name)
+                continue
+            values.append(runtime[field])
+        if missing:
+            reasons.append(f"runtime.{field} missing from reports: {', '.join(missing)}")
+            continue
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            reasons.append(f"runtime.{field} is not identical across reports")
+    return reasons
+
+
 def evaluate_files(policy_path: Path, report_paths: Sequence[Path]) -> tuple[int, dict[str, Any]]:
     policy, policy_error = _read_json(policy_path)
     if policy_error is not None or policy is None:
@@ -173,6 +218,10 @@ def evaluate_files(policy_path: Path, report_paths: Sequence[Path]) -> tuple[int
     if policy_errors:
         return 3, {"verdict": "invalid-policy", "errors": policy_errors}
 
+    minimum_count = policy.get("minimum_report_count", 1)
+    fingerprint_fields = policy.get("required_runtime_fingerprint_fields", [])
+
+    parsed: list[tuple[str, Mapping[str, Any]]] = []
     reports: list[dict[str, Any]] = []
     malformed = False
     rejected = False
@@ -185,6 +234,17 @@ def evaluate_files(policy_path: Path, report_paths: Sequence[Path]) -> tuple[int
         reasons = evaluate_report(report, policy)
         rejected = rejected or bool(reasons)
         reports.append({"report": str(path), "reasons": reasons})
+        parsed.append((str(path), report))
+
+    combined_reasons: list[str] = []
+    if len(report_paths) < minimum_count:
+        combined_reasons.append(
+            f"policy requires at least {minimum_count} report file(s), got {len(report_paths)}"
+        )
+    combined_reasons.extend(_fingerprint_reasons(parsed, fingerprint_fields))
+    if combined_reasons:
+        rejected = True
+
     if malformed:
         code = 4
         verdict = "invalid-input"
@@ -194,7 +254,10 @@ def evaluate_files(policy_path: Path, report_paths: Sequence[Path]) -> tuple[int
     else:
         code = 0
         verdict = "qualified"
-    return code, {"verdict": verdict, "reports": reports}
+    result: dict[str, Any] = {"verdict": verdict, "reports": reports}
+    if combined_reasons:
+        result["reasons"] = combined_reasons
+    return code, result
 
 
 def _parser() -> argparse.ArgumentParser:
