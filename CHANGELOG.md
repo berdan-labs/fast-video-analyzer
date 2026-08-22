@@ -11,6 +11,10 @@ intent.
 - Deterministic corpus coverage for standalone audio with a subtitle sidecar
   and transcript-only SRT input. These cases validate modality routing and
   parsing; they do not claim real-model accuracy.
+- An owner-local performance benchmark and fail-closed hardware-qualification
+  evaluator now record cold-cache runtime facts, stable output-lane digests,
+  and exact quality-contract evidence without turning an unqualified timing
+  result into a product promise.
 
 ### Changed
 
