@@ -3443,7 +3443,16 @@ class _StreamingOCRPrefetch:
             return
         self._closed = True
         if not self._failed.is_set():
-            self._queue.put(None)
+            # A worker can fail between the state check and this enqueue. Use
+            # timed puts so a full queue cannot strand shutdown indefinitely;
+            # the worker's failure event then lets us abandon the sentinel and
+            # join the already-terminating thread safely.
+            while not self._failed.is_set():
+                try:
+                    self._queue.put(None, timeout=0.25)
+                    break
+                except queue.Full:
+                    continue
         self._thread.join()
         for worker in self._owned_workers:
             close = getattr(worker, "close", None)
