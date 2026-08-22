@@ -92,6 +92,21 @@ def parse_showinfo(stderr: str) -> tuple[DecodedFrameTiming, ...]:
     return tuple(results)
 
 
+def _hwaccel_input_options(hwaccel: str | None) -> list[str]:
+    """Return bounded input options for an optional hardware decoder.
+
+    ``-hwaccel`` is an input option and must precede ``-i``.  When unset the
+    result is empty so default commands stay byte-for-byte identical and the
+    measured showinfo contract is untouched.
+    """
+
+    if hwaccel is None:
+        return []
+    if not hwaccel.strip():
+        raise InputError("hwaccel must be a non-empty string when provided")
+    return ["-hwaccel", hwaccel]
+
+
 def build_frame_extraction_command(
     media_path: Path,
     requested_ms: int,
@@ -100,6 +115,7 @@ def build_frame_extraction_command(
     video_stream_index: int = 0,
     ffmpeg_threads: int | None = None,
     ffmpeg_bin: str = "ffmpeg",
+    hwaccel: str | None = None,
 ) -> list[str]:
     if requested_ms < 0:
         raise InputError("requested frame time cannot be negative")
@@ -116,6 +132,7 @@ def build_frame_extraction_command(
         "-loglevel",
         "info",
         *(["-threads", str(ffmpeg_threads)] if ffmpeg_threads is not None else []),
+        *_hwaccel_input_options(hwaccel),
         # Fast input seeking bounds work for long recordings. ``-copyts``
         # preserves the source clock so the measured showinfo PTS remains
         # comparable with the requested absolute media timestamp; the filter
@@ -164,6 +181,7 @@ def _run_extract(
     ffmpeg_threads: int | None,
     ffmpeg_bin: str,
     timeout_seconds: float,
+    hwaccel: str | None = None,
 ) -> DecodedFrameTiming:
     command = build_frame_extraction_command(
         media_path,
@@ -172,6 +190,7 @@ def _run_extract(
         video_stream_index=video_stream_index,
         ffmpeg_threads=ffmpeg_threads,
         ffmpeg_bin=ffmpeg_bin,
+        hwaccel=hwaccel,
     )
     try:
         completed = subprocess.run(
@@ -216,6 +235,7 @@ def extract_frame(
     ffmpeg_threads: int | None = None,
     ffmpeg_bin: str = "ffmpeg",
     timeout_seconds: float = 120.0,
+    hwaccel: str | None = None,
 ) -> ExtractedFrame:
     source = Path(media_path).expanduser()
     destination = Path(output_path).expanduser()
@@ -241,6 +261,7 @@ def extract_frame(
             ffmpeg_threads=ffmpeg_threads,
             ffmpeg_bin=ffmpeg_bin,
             timeout_seconds=timeout_seconds,
+            hwaccel=hwaccel,
         )
         os.replace(temporary, destination)
     finally:
