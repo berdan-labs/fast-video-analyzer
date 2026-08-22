@@ -374,7 +374,7 @@ class PaddleOCRV5Adapter(OCRAdapter):
         if not image.is_file():
             raise InputError(f"OCR image does not exist: {image}")
         detector, recognizer = self._verified_models()
-        payload = self._invoke(
+        payload = self._invoke_batch(
             {
                 "mode": "recognize",
                 "image_path": str(image),
