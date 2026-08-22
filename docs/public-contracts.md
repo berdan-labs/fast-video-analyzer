@@ -186,7 +186,7 @@ Supported operational variables:
 | --- | --- |
 | Output and stores | `VSR_OUTPUT_ROOT`, `VSR_MODEL_ROOT`, `VSR_WORKER_ROOT`, `VSR_TESSERACT_PATH`, `VSR_FASTER_WHISPER_LARGE_V3_PATH` |
 | Source selection | `VSR_PREFER_WHISPER`, `VSR_ASR_LANGUAGE_HINT` |
-| Review/limits | `VSR_SEMANTIC_MAX_PACKETS`, `VSR_HOST_REVIEW_MAX_PACKETS`, `VSR_SEMANTIC_FAILURE_LIMIT`, `VSR_KEEP_COMPLETED_CHECKPOINTS`, `VSR_ASR_PROGRESS_HEARTBEAT_SECONDS` |
+| Review/limits | `VSR_SEMANTIC_MAX_PACKETS`, `VSR_HOST_REVIEW_MAX_PACKETS`, `VSR_SEMANTIC_FAILURE_LIMIT`, `VSR_KEEP_COMPLETED_CHECKPOINTS`, `VSR_ASR_PROGRESS_HEARTBEAT_SECONDS`, `VSR_SURVEY_TIMEOUT_SECONDS` |
 | Worker counts | `VSR_ASR_CPU_THREADS`, `VSR_FASTER_WHISPER_NUM_WORKERS`, `VSR_OCR_WORKERS`, `VSR_OCR_REFRESH_WORKERS`, `VSR_FRAME_EXTRACT_WORKERS`, `VSR_FRAME_ANALYSIS_WORKERS`, `VSR_CROP_PREP_WORKERS`, `VSR_SURVEY_FFMPEG_THREADS`, `VSR_VALIDATOR_METADATA_WORKERS`, `VSR_SEMANTIC_WORKERS` |
 | Cache budgets/locations | `VSR_DISABLE_ASR_SHARED_CACHE`, `VSR_ASR_SHARED_CACHE_DIR`, `VSR_ASR_SHARED_CACHE_MAX_BYTES`, `VSR_DISABLE_VISUAL_SHARED_CACHE`, `VSR_VISUAL_SHARED_CACHE_DIR`, `VSR_VISUAL_SHARED_CACHE_MAX_BYTES`, `VSR_DISABLE_SEMANTIC_SHARED_CACHE`, `VSR_SEMANTIC_SHARED_CACHE_DIR`, `VSR_SEMANTIC_SHARED_CACHE_MAX_BYTES`, `VSR_OCR_CACHE_MAX_BYTES`, `VSR_OCR_SHARED_CACHE_MAX_BYTES`, `VSR_VISUAL_FRAME_CACHE_MAX_BYTES` |
 
@@ -196,6 +196,13 @@ decoder call is running; `0` disables them. Heartbeats do not interrupt,
 retry, or change transcript output and are not evidence that a chunk completed.
 Heartbeat events update only the small progress file; the run manifest remains
 checkpoint-based and is not a heartbeat log.
+
+The visual survey wall-clock bound is duration-aware: media up to one hour
+keeps the historical 600-second budget, longer media scale linearly past it,
+and the bound is capped at one day. `VSR_SURVEY_TIMEOUT_SECONDS` overrides that
+computed bound with a positive number of seconds (clamped to the same cap);
+empty or invalid values fall back to the computed bound. The timeout changes
+only how long one survey decode may run, never sampling or evidence output.
 
 Advanced or compatibility-only variables are recognized but provisional:
 

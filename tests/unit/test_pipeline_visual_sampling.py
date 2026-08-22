@@ -37,6 +37,7 @@ from video_script_reconstructor.pipeline import (
     _visual_crop_workers,
     _visual_frame_workers,
     _visual_shared_cache_dir,
+    _visual_survey_timeout_seconds,
 )
 from video_script_reconstructor.scene_detection import (
     SurveyCandidate,
@@ -1459,3 +1460,87 @@ def test_visual_frame_checkpoint_budget_prunes_old_schedules_without_touching_cu
     assert current.is_dir()
     assert old_b.is_dir()
     assert not old_a.exists()
+
+
+def test_survey_timeout_keeps_short_media_on_the_default_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VSR_SURVEY_TIMEOUT_SECONDS", raising=False)
+
+    assert _visual_survey_timeout_seconds(10_000) == 600.0
+    assert _visual_survey_timeout_seconds(3_600_000) == 600.0
+
+
+def test_survey_timeout_scales_for_long_media(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VSR_SURVEY_TIMEOUT_SECONDS", raising=False)
+
+    assert _visual_survey_timeout_seconds(7_200_000) == 1_200.0
+    assert _visual_survey_timeout_seconds(18_000_000) == 3_000.0
+    assert _visual_survey_timeout_seconds(864_000_000_000) == 86_400.0
+
+
+def test_survey_timeout_env_override_is_valid_and_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VSR_SURVEY_TIMEOUT_SECONDS", "7200")
+    assert _visual_survey_timeout_seconds(10_000) == 7_200.0
+
+    monkeypatch.setenv("VSR_SURVEY_TIMEOUT_SECONDS", "999999")
+    assert _visual_survey_timeout_seconds(10_000) == 86_400.0
+
+
+def test_survey_timeout_invalid_env_override_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VSR_SURVEY_TIMEOUT_SECONDS", raising=False)
+    baseline = _visual_survey_timeout_seconds(18_000_000)
+    assert baseline == 3_000.0
+
+    for raw in ("", "   ", "abc", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("VSR_SURVEY_TIMEOUT_SECONDS", raw)
+        assert _visual_survey_timeout_seconds(18_000_000) == baseline
+
+
+def test_fallback_survey_receives_the_duration_aware_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("VSR_SURVEY_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("VSR_DISABLE_VISUAL_SHARED_CACHE", "1")
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"deterministic source")
+    project = tmp_path / "project"
+    observed: dict[str, float] = {}
+
+    def fail_shared_emission(*_args: object, **kwargs: object):
+        observed["combined"] = float(kwargs["timeout_seconds"])
+        raise ValidationFailure("combined visual survey exceeded the 3000s timeout")
+
+    def fake_fallback_survey(*_args: object, **kwargs: object):
+        observed["fallback"] = float(kwargs["timeout_seconds"])
+        return ()
+
+    monkeypatch.setattr("video_script_reconstructor.pipeline._tool_version", lambda _path: "ffmpeg-test")
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.detect_combined_survey_frames",
+        fail_shared_emission,
+    )
+    monkeypatch.setattr(
+        "video_script_reconstructor.scene_detection.survey_video_candidates",
+        fake_fallback_survey,
+    )
+    candidates, shared_frames = _load_or_run_visual_survey_with_frames(
+        source,
+        project,
+        duration_ms=18_000_000,
+        interval_seconds=30.0,
+        strict=True,
+        scene_detection=True,
+        adaptive_detection=True,
+        speech_reference_times_ms=(),
+        periodic_times_ms=(0,),
+        frame_output_dir=project / "survey",
+    )
+
+    assert candidates == ()
+    assert shared_frames == ()
+    assert observed["combined"] == observed["fallback"] == 3_000.0

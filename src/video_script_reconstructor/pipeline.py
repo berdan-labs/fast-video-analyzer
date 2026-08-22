@@ -2319,6 +2319,7 @@ def _load_or_run_visual_survey(
             scene_detection=scene_detection,
             adaptive_detection=adaptive_detection,
             ffmpeg_threads=_visual_survey_ffmpeg_threads(),
+            timeout_seconds=_visual_survey_timeout_seconds(duration_ms),
             speech_reference_times_ms=(),
         )
         _write_visual_survey_cache(
@@ -2389,6 +2390,7 @@ def _load_or_run_visual_survey_with_frames(
     # Resolve before ASR/visual worker overlap can mutate runtime search paths
     # while faster-whisper registers CUDA DLL folders.
     ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
+    survey_timeout_seconds = _visual_survey_timeout_seconds(duration_ms)
 
     cache_path, key, source_digest, ffmpeg_version = _visual_survey_cache_identity(
         source,
@@ -2499,6 +2501,7 @@ def _load_or_run_visual_survey_with_frames(
                         emitted_periodic_times,
                         ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                         ffmpeg_bin=ffmpeg_path,
+                        timeout_seconds=survey_timeout_seconds,
                     )
                     if attempt_index:
                         LOGGER.info(
@@ -2580,6 +2583,7 @@ def _load_or_run_visual_survey_with_frames(
                 adaptive_detection=adaptive_detection,
                 ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                 ffmpeg_bin=ffmpeg_path,
+                timeout_seconds=survey_timeout_seconds,
                 speech_reference_times_ms=speech_reference_times_ms,
             )
     else:
@@ -2592,6 +2596,7 @@ def _load_or_run_visual_survey_with_frames(
             adaptive_detection=adaptive_detection,
             ffmpeg_threads=_visual_survey_ffmpeg_threads(),
             ffmpeg_bin=ffmpeg_path,
+            timeout_seconds=survey_timeout_seconds,
             speech_reference_times_ms=speech_reference_times_ms,
         )
     _write_visual_survey_cache(
@@ -4802,6 +4807,36 @@ def _visual_survey_ffmpeg_threads() -> int:
         except ValueError:
             LOGGER.warning("Ignoring invalid VSR_SURVEY_FFMPEG_THREADS=%r", override)
     return max(1, min(4, (os.cpu_count() or 1) // 2))
+
+
+def _visual_survey_timeout_seconds(duration_ms: int) -> float:
+    """Return a duration-aware wall-clock bound for one survey decode pass.
+
+    The combined hard-cut/adaptive/periodic survey decodes the complete source
+    once, so the historical fixed 600-second ceiling killed long recordings
+    before FFmpeg finished.  The computed bound keeps the 600-second budget
+    that already covers up to one hour of media and then scales linearly past
+    it (one budget second per six media seconds), capped at one day so the
+    value stays bounded.  ``VSR_SURVEY_TIMEOUT_SECONDS`` remains an explicit
+    bounded override; empty or invalid values fall back to the computed bound.
+    """
+
+    computed = min(86_400.0, max(600.0, duration_ms / 6_000.0))
+    override = os.environ.get("VSR_SURVEY_TIMEOUT_SECONDS", "").strip()
+    if not override:
+        return computed
+    try:
+        value = float(override)
+    except ValueError:
+        LOGGER.warning("Ignoring invalid VSR_SURVEY_TIMEOUT_SECONDS=%r", override)
+        return computed
+    if not math.isfinite(value) or value <= 0:
+        LOGGER.warning("Ignoring invalid VSR_SURVEY_TIMEOUT_SECONDS=%r", override)
+        return computed
+    if value > 86_400.0:
+        LOGGER.warning("Clamping VSR_SURVEY_TIMEOUT_SECONDS=%s to 86400", value)
+        return 86_400.0
+    return value
 
 
 def _ocr_workers() -> int:

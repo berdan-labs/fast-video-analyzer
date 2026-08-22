@@ -1054,6 +1054,7 @@ def survey_video_candidates(
     adaptive_sample_fps: float = 2.0,
     ffmpeg_threads: int | None = 4,
     ffmpeg_bin: str = "ffmpeg",
+    timeout_seconds: float = 600.0,
     signal_samples: Iterable[SurveySignal] = (),
     chapter_times_ms: Iterable[int] = (),
     speech_reference_times_ms: Iterable[int] = (),
@@ -1070,6 +1071,7 @@ def survey_video_candidates(
                 adaptive_sample_fps=adaptive_sample_fps,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
         except ValidationFailure:
             # Preserve the exact, independently tested single-detector paths
@@ -1081,6 +1083,7 @@ def survey_video_candidates(
                 threshold=scene_threshold,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
             decoded_adaptive = detect_adaptive_candidates(
                 media_path,
@@ -1088,6 +1091,7 @@ def survey_video_candidates(
                 sample_fps=adaptive_sample_fps,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
     elif scene_detection:
         detected = detect_scene_candidates(
@@ -1095,6 +1099,7 @@ def survey_video_candidates(
             threshold=scene_threshold,
             ffmpeg_threads=ffmpeg_threads,
             ffmpeg_bin=ffmpeg_bin,
+            timeout_seconds=timeout_seconds,
         )
     elif adaptive_detection:
         decoded_adaptive = detect_adaptive_candidates(
@@ -1103,6 +1108,7 @@ def survey_video_candidates(
             sample_fps=adaptive_sample_fps,
             ffmpeg_threads=ffmpeg_threads,
             ffmpeg_bin=ffmpeg_bin,
+            timeout_seconds=timeout_seconds,
         )
     adaptive = adaptive_signal_candidates(signal_samples)
     context = contextual_candidates(
