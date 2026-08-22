@@ -319,10 +319,7 @@ _BATCH_WINDOW_SECONDS = Decimal("0.250")
 _EXACT_SEEK_DENSITY_THRESHOLD = 4.0
 _LONG_SPAN_EXACT_SEEK_MIN_MS = 10 * 60 * 1000
 _LONG_SPAN_EXACT_SEEK_DENSITY_THRESHOLD = 4.0
-# Eight sparse exact-seek requests are enough to amortize FFmpeg startup while
-# retaining the concat route's per-window timing and pixel validation. Smaller
-# groups stay on independent seeks because process startup is usually cheaper.
-_CONCAT_SEEK_MIN_REQUESTS = 8
+_CONCAT_SEEK_MIN_REQUESTS = 16
 _CONCAT_SEEK_CHUNK_SIZE = 64
 _CONCAT_SEEK_CLOCK_MS = 1000
 
