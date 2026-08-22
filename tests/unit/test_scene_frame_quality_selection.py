@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
@@ -251,11 +253,13 @@ def test_standalone_survey_commands_accept_bounded_codec_threads() -> None:
 def test_combined_survey_command_shares_decode_and_labels_branches() -> None:
     command = build_combined_survey_command(Path("clip.mp4"))
     graph = command[command.index("-filter_complex") + 1]
-    assert "split=2" in graph
+    assert "split=3" in graph
     assert "showinfo@hard" in graph
     assert "showinfo@adaptive" in graph
     assert "nullsink" in graph
     assert "[keepalive]" in graph
+    assert "[survey_output]null[keepalive]" in graph
+    assert "-frames:v" not in command
     assert command.count("-map") == 1
     assert command[command.index("-map") + 1] == "[keepalive]"
 
@@ -280,6 +284,58 @@ def test_combined_candidate_survey_keeps_empty_branches_one_pass(
     assert calls == 1
     assert hard == ()
     assert any(candidate.actual_ms == 2_000 for candidate in adaptive)
+
+
+def test_combined_candidate_survey_consumes_late_scene_cuts(tmp_path: Path) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("FFmpeg is required for the real survey regression fixture")
+    source = tmp_path / "late-cuts.mkv"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x180:r=10:d=8",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=320x180:r=10:d=8",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=320x180:r=10:d=8",
+            "-filter_complex",
+            "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p[v]",
+            "-map",
+            "[v]",
+            "-c:v",
+            "ffv1",
+            "-y",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    candidate_hard, candidate_adaptive = detect_combined_survey_candidates(
+        source, timeout_seconds=30
+    )
+    emitted_hard, emitted_adaptive, _frames = detect_combined_survey_frames(
+        source,
+        tmp_path / "emitted",
+        (0, 8_000, 16_000),
+        timeout_seconds=30,
+    )
+
+    assert [item.actual_ms for item in candidate_hard] == [8_000, 16_000]
+    assert candidate_hard == emitted_hard
+    assert candidate_adaptive == emitted_adaptive
 
 
 def test_shared_survey_frame_command_emits_only_safe_branches() -> None:

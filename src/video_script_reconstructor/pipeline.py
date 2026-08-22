@@ -2109,11 +2109,11 @@ def _visual_survey_cache_identity(
     source_digest = source_sha256 or sha256_file(source)
     ffmpeg_version = _tool_version(shutil.which("ffmpeg")) or "unavailable"
     key = cache_key(
-        # The periodic tail guard changes the requested safety schedule for
-        # media whose container duration extends past the final video frame.
-        # Version the receipt so a resume cannot restore a pre-fix endpoint
-        # candidate from an older run.
-        "visual-survey-v3-tail-guard",
+        # The full-decode detector fix restores hard/adaptive candidates after
+        # the old synthetic keepalive ended early. Version the receipt so a
+        # resume cannot restore that incomplete structural schedule. The v3
+        # tail-guard behavior remains part of this policy.
+        "visual-survey-v4-full-decode",
         source_digest,
         duration_ms,
         round(interval_seconds, 6),
@@ -2383,6 +2383,7 @@ def _load_or_run_visual_survey_with_frames(
         contextual_candidates,
         detect_combined_survey_frames,
         merge_survey_candidates,
+        periodic_candidates,
         survey_video_candidates,
     )
     # Resolve before ASR/visual worker overlap can mutate runtime search paths
@@ -2492,7 +2493,7 @@ def _load_or_run_visual_survey_with_frames(
                                 shutil.rmtree(stale_path, ignore_errors=True)
                             elif not stale_path.is_symlink():
                                 stale_path.unlink(missing_ok=True)
-                    _hard, _adaptive, emitted = detect_combined_survey_frames(
+                    measured_hard, measured_adaptive, emitted = detect_combined_survey_frames(
                         source,
                         frame_output_dir,
                         emitted_periodic_times,
@@ -2522,25 +2523,24 @@ def _load_or_run_visual_survey_with_frames(
                         raise
             if last_emission_error is not None:
                 raise last_emission_error
-            # The frame-emission detector intentionally exposes every raw
-            # adaptive sample so its timing stream can be audited. Those raw
-            # samples are not the canonical candidate policy: the established
-            # survey path applies the adaptive thresholds/clustering rules
-            # that reduce motion noise to protected state changes. Re-run that
-            # inexpensive candidate-only pass and use it as the authority;
-            # the combined pass contributes pixels only. Falling back to the
-            # raw adaptive stream here would turn a 312-frame reconstruction
-            # into 1,000+ frames on ordinary presenter motion.
-            structural_candidates = survey_video_candidates(
-                source,
-                duration_ms=duration_ms,
-                interval_seconds=interval_seconds,
-                strict=strict,
-                scene_detection=scene_detection,
-                adaptive_detection=adaptive_detection,
-                ffmpeg_threads=_visual_survey_ffmpeg_threads(),
-                ffmpeg_bin=ffmpeg_path,
-                speech_reference_times_ms=(),
+            # The frame-emission graph applies the same hard/adaptive detector
+            # filters as the candidate-only graph. Rebuild the canonical
+            # structural policy from those measured streams: add the periodic
+            # safety schedule, then run the same merge/clustering pass used by
+            # ``survey_video_candidates``. This avoids decoding the complete
+            # source a second time. Synthetic late-cut and real 80-minute
+            # parity fixtures require every timestamp, raw PTS, time base,
+            # reason, score, and source label to match across the two graphs.
+            structural_candidates = merge_survey_candidates(
+                (
+                    periodic_candidates(
+                        duration_ms,
+                        interval_seconds=interval_seconds,
+                        strict=strict,
+                    ),
+                    measured_hard,
+                    measured_adaptive,
+                )
             )
             candidates = merge_survey_candidates(
                 (

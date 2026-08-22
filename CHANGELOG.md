@@ -19,9 +19,11 @@ intent.
   imply chunk completion or alter transcript output.
 - The overlapped visual survey now retries bounded periodic-frame filter graphs
   when a platform FFmpeg allocator rejects a large expression. The retry keeps
-  exact hard/periodic pixels as acceleration receipts while the established
-  candidate-only survey remains authoritative for adaptive sampling, so
-  fallback extraction and canonical output stay unchanged.
+  exact hard/periodic pixels as acceleration receipts. Its detector graph now
+  consumes the complete source, including late scene changes, and its measured
+  hard/adaptive streams feed the canonical merge policy directly instead of
+  triggering a redundant second full decode. Incomplete pre-fix survey caches
+  are invalidated; guarded fallback extraction remains available.
 
 ## [0.2.0] - 2026-08-20
 

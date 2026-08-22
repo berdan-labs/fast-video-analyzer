@@ -449,9 +449,10 @@ def build_combined_survey_command(
     in stderr even though FFmpeg shares the decoded input through ``split``.
     Both detector branches terminate in ``nullsink`` so an empty branch cannot
     make the null muxer fail and trigger two expensive fallback decodes.  A
-    one-frame synthetic keepalive stream is the sole mapped output; it exists
-    only to keep FFmpeg's output contract valid and is never parsed as a
-    detector measurement.
+    pass-through copy of the decoded input is the sole mapped output.  Mapping
+    the complete input, rather than a short synthetic keepalive, is essential:
+    FFmpeg may otherwise stop the graph before late detector measurements have
+    been produced.
     """
 
     if not 0 <= scene_threshold <= 1:
@@ -465,11 +466,11 @@ def build_combined_survey_command(
     if ffmpeg_threads is not None and ffmpeg_threads <= 0:
         raise InputError("ffmpeg_threads must be positive when provided")
     filter_graph = (
-        f"[0:v:{video_stream_index}]split=2[hard_input][adaptive_input];"
+        f"[0:v:{video_stream_index}]split=3[hard_input][adaptive_input][survey_output];"
         f"[hard_input]select=gt(scene\\,{scene_threshold:.8g}),showinfo@hard,nullsink;"
         f"[adaptive_input]fps={adaptive_sample_fps:.8g},"
         f"select=gt(scene\\,{adaptive_threshold:.8g}),showinfo@adaptive,nullsink;"
-        "color=c=black:s=2x2:r=1:d=1,format=yuv420p[keepalive]"
+        "[survey_output]null[keepalive]"
     )
     return [
         ffmpeg_bin,
@@ -484,8 +485,6 @@ def build_combined_survey_command(
         filter_graph,
         "-map",
         "[keepalive]",
-        "-frames:v",
-        "1",
         "-an",
         "-sn",
         "-f",
@@ -1069,9 +1068,10 @@ def survey_video_candidates(
                 ffmpeg_bin=ffmpeg_bin,
             )
         except ValidationFailure:
-            # A branch with no selected frames makes FFmpeg's null muxer return
-            # an empty-stream error. Preserve the exact, independently tested
-            # paths rather than treating an absent candidate as a timestamp.
+            # Preserve the exact, independently tested single-detector paths
+            # if the combined graph cannot be constructed or completed on a
+            # particular FFmpeg build. Never treat a failed/absent measurement
+            # as a candidate timestamp.
             detected = detect_scene_candidates(
                 media_path,
                 threshold=scene_threshold,

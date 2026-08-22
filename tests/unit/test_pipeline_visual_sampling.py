@@ -675,18 +675,6 @@ def test_context_change_reuses_structural_survey_with_frames(
     source.write_bytes(b"deterministic source")
     project = tmp_path / "project"
     calls = 0
-    canonical_candidates = (
-        SurveyCandidate(
-            candidate_id="VC000001",
-            requested_ms=1_000,
-            actual_ms=1_002,
-            raw_pts=42,
-            time_base="1/1000",
-            reasons=("scene_cut",),
-            score=0.9,
-            timestamp_source="decoded-survey",
-        ),
-    )
 
     def fake_combined(*_args: object, **_kwargs: object):
         nonlocal calls
@@ -712,9 +700,13 @@ def test_context_change_reuses_structural_survey_with_frames(
         "video_script_reconstructor.scene_detection.detect_combined_survey_frames",
         fake_combined,
     )
+
+    def fail_redundant_candidate_decode(*_args: object, **_kwargs: object):
+        raise AssertionError("shared survey measurements must remain the candidate authority")
+
     monkeypatch.setattr(
         "video_script_reconstructor.scene_detection.survey_video_candidates",
-        lambda *_args, **_kwargs: canonical_candidates,
+        fail_redundant_candidate_decode,
     )
     first, first_frames = _load_or_run_visual_survey_with_frames(
         source,
