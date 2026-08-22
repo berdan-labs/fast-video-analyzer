@@ -36,6 +36,7 @@ the corpus case. Keep the output root outside the repository, for example:
 ```bash
 uv run python scripts/benchmark_pipeline.py \
   tests/fixtures/generated/caption-variants.mp4 \
+  --workload-id short-subtitle-led \
   --subtitle tests/fixtures/generated/caption-variants.vtt \
   --subtitle tests/fixtures/generated/caption-variants.ass \
   --output ../fast-video-analyzer-owner/performance/dev-301/cpu-short-cold \
@@ -107,6 +108,25 @@ generated fixtures, tests, and public methodology.
 Pipeline benchmark reports use schema `1.1` and `report_kind` set to
 `pipeline-benchmark`; ASR chunk sweeps use the same schema with
 `report_kind=asr-chunk-sweep`.
+
+## Owner-local qualification
+
+When a five-hour corpus and a named host are genuinely ready, create the policy
+outside Git and evaluate the resulting cold reports:
+
+```bash
+uv run python scripts/qualify_benchmark.py \
+  --policy ../fast-video-analyzer-owner/qualification/dense-five-hour.json \
+  --report ../fast-video-analyzer-owner/qualification/run-001.json
+```
+
+The evaluator exits `0` only when the policy schema, workload ID, report schema,
+cache state, validation, duration floor, exact quality contract, required lane
+digests, elapsed time, and p95 time all pass. It exits non-zero for malformed or
+missing evidence; no absent field defaults to success. The committed
+`tests/qualification_policy.example.json` is intentionally impossible to
+satisfy and is a schema example, not a performance claim. Keep real policies,
+reports, media, and host receipts owner-local.
 
 ## Budgets and comparison rules
 

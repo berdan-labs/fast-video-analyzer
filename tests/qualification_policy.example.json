@@ -1,0 +1,21 @@
+{
+  "policy_version": 1,
+  "workload_id": "PLACEHOLDER_WORKLOAD_ID",
+  "report_kind": "pipeline-benchmark",
+  "schema_version": "1.1",
+  "require_cache_reused_false": true,
+  "require_shared_cache_disabled": true,
+  "min_media_duration_s": 999999,
+  "quality_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "required_lane_digests": [
+    "transcript_segments",
+    "frames",
+    "ocr_observations",
+    "script_blocks",
+    "timeline",
+    "visual_events",
+    "evidence_image_metadata"
+  ],
+  "max_elapsed_seconds": 0.0001,
+  "max_p95_seconds": 0.0001
+}

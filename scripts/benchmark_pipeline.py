@@ -148,6 +148,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--workload-id",
+        help="Stable workload identifier for a later owner-local hardware qualification.",
+    )
     parser.add_argument("--subtitle", action="append", type=Path, default=[])
     parser.add_argument("--transcript", type=Path)
     parser.add_argument("--preset", choices=("strict", "balanced"), default="strict")
@@ -488,6 +492,7 @@ def benchmark(
     vision_mode: str = "none",
     asr_chunk_seconds: int | None = None,
     asr_overlap_seconds: int | None = None,
+    workload_id: str | None = None,
     resume: bool = True,
     repeat: int = 1,
     asr_adapter: Any | None = None,
@@ -527,6 +532,7 @@ def benchmark(
     latest = dict(iterations[-1])
     latest["schema_version"] = "1.1"
     latest["report_kind"] = "pipeline-benchmark"
+    latest["workload_id"] = workload_id
     latest["iterations"] = iterations
     latest["timing_summary"] = summarize_elapsed(
         [float(item["elapsed_seconds"]) for item in iterations]
@@ -727,6 +733,7 @@ def main() -> int:
             vision_mode=args.vision_mode,
             asr_chunk_seconds=args.asr_chunk_seconds,
             asr_overlap_seconds=args.asr_overlap_seconds,
+            workload_id=args.workload_id,
             resume=not args.no_resume,
             repeat=args.repeat,
             independent_validation=args.independent_validation,
