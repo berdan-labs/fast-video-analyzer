@@ -479,6 +479,49 @@ def test_selection_reuses_precomputed_perceptual_hash(
     assert {item.candidate.frame_id for item in result.selected} == {"F000001", "F000002"}
 
 
+def test_selection_uses_equal_pixel_hash_before_perceptual_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before, _after, same = _state_images(tmp_path)
+    quality = assess_frame_quality(before)
+    pixel_hash = normalized_pixel_hash(before)
+    candidates = [
+        FrameCandidate(
+            "F000001",
+            before,
+            0,
+            relevance=0.2,
+            importance=0.2,
+            quality=quality,
+            pixel_hash=pixel_hash,
+        ),
+        FrameCandidate(
+            "F000002",
+            same,
+            100,
+            relevance=0.2,
+            importance=0.2,
+            quality=quality,
+            pixel_hash=pixel_hash,
+        ),
+    ]
+
+    def fail_recompute(_path: object, **_kwargs: object) -> str:
+        raise AssertionError("equal canonical pixels must not trigger perceptual decoding")
+
+    monkeypatch.setattr(frame_selection_module, "perceptual_dhash", fail_recompute)
+    result = select_frames(
+        candidates,
+        duration_ms=1_000,
+        important_event_count=1,
+        evidence_density_per_minute=1,
+    )
+    assert [item.candidate.frame_id for item in result.selected] == ["F000001"]
+    assert result.duplicate_frame_ids == ("F000002",)
+    assert result.provenance[1].reason == "exact_pixel_hash"
+    assert result.provenance[1].perceptual_hamming == 0
+
+
 def test_importance_aware_selection_collapses_repetitive_low_context_with_receipt(
     tmp_path: Path,
 ) -> None:
