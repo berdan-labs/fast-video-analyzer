@@ -21,3 +21,6 @@ tests/generated/
 *.validate*.json
 *.run*.json
 (Analyzer Batch Outputs)/
+# Owner-only design drafts; product assets must be added deliberately.
+assets/brand-concepts.png
+assets/brand-concepts.svg
