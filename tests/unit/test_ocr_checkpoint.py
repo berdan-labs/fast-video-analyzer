@@ -97,6 +97,59 @@ def test_streaming_ocr_prefetch_failure_is_optional_and_non_blocking(tmp_path: P
     assert prefetch.metrics["error"] == "fixture streaming failure"
 
 
+def test_streaming_ocr_prefetch_fanout_failure_is_bounded_and_records_clear_error(
+    tmp_path: Path,
+) -> None:
+    """A failing fan-out batch stops dispatch, reports one clear error, and
+    never records partial or cross-frame canonical references."""
+
+    class FanoutFailingAdapter(SpawnableBatchOCRAdapter):
+        def recognize_many(
+            self,
+            images: list[Path],
+            *,
+            frame_ids: list[str],
+            observation_ids: list[str],
+            language: str | None = None,
+        ) -> dict[str, OCRObservation]:
+            self.batch_sizes.append(len(images))
+            self.calls.extend(str(image) for image in images)
+            if len(self.batch_sizes) > 1:
+                raise RuntimeError("fixture fan-out failure")
+            return {
+                frame_id: _observation(frame_id, observation_id, image.stem)
+                for image, frame_id, observation_id in zip(
+                    images, frame_ids, observation_ids, strict=True
+                )
+            }
+
+    frames = []
+    for index in range(4):
+        path = tmp_path / f"fanout-{index}.png"
+        path.write_bytes(f"frame-{index}".encode())
+        frames.append(SimpleNamespace(frame_id=f"F{index + 1:06d}", path=path))
+
+    prefetch = _StreamingOCRPrefetch(FanoutFailingAdapter(), batch_size=1, worker_count=2)
+    for frame in frames:
+        prefetch.submit(frame)
+    prefetch.finish()
+
+    assert prefetch.metrics["error"] == "fixture fan-out failure"
+    assert prefetch.metrics["worker_count"] == 2
+    # The failed batch and every batch after it contribute nothing; only
+    # complete batches may surface, each attributed to its own frame.
+    assert "F000004" not in prefetch.observations
+    expected_text = {
+        frame.frame_id: Path(frame.path).stem
+        for frame in frames
+        if frame.frame_id in prefetch.observations
+    }
+    assert set(prefetch.observations) == set(expected_text)
+    for frame_id, observation in prefetch.observations.items():
+        assert observation.frame_id == frame_id
+        assert observation.normalized_interpretation == expected_text[frame_id]
+
+
 def test_paddle_ocr_batch_worker_policy_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VSR_PADDLE_OCR_WORKERS", raising=False)
     assert _paddle_ocr_batch_workers() == 1
