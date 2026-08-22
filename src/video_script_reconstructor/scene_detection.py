@@ -359,6 +359,21 @@ def _showinfo_time_base(stderr: str) -> str | None:
     return match.group("base") if match else None
 
 
+def _hwaccel_input_options(hwaccel: str | None) -> list[str]:
+    """Return bounded input options for an optional hardware decoder.
+
+    ``-hwaccel`` is an input option and must precede ``-i``.  When unset the
+    result is empty so default commands stay byte-for-byte identical and the
+    generated filter graph is untouched.
+    """
+
+    if hwaccel is None:
+        return []
+    if not hwaccel.strip():
+        raise InputError("hwaccel must be a non-empty string when provided")
+    return ["-hwaccel", hwaccel]
+
+
 def build_scene_detection_command(
     media_path: Path,
     *,
@@ -442,6 +457,7 @@ def build_combined_survey_command(
     video_stream_index: int = 0,
     ffmpeg_threads: int | None = None,
     ffmpeg_bin: str = "ffmpeg",
+    hwaccel: str | None = None,
 ) -> list[str]:
     """Build one decode pass for hard-cut and adaptive survey branches.
 
@@ -479,6 +495,7 @@ def build_combined_survey_command(
         "-loglevel",
         "info",
         *( ["-threads", str(ffmpeg_threads)] if ffmpeg_threads is not None else [] ),
+        *_hwaccel_input_options(hwaccel),
         "-i",
         str(media_path),
         "-filter_complex",
@@ -522,6 +539,7 @@ def build_combined_survey_frame_command(
     video_stream_index: int = 0,
     ffmpeg_threads: int | None = None,
     ffmpeg_bin: str = "ffmpeg",
+    hwaccel: str | None = None,
 ) -> list[str]:
     """Build one survey decode that emits safe periodic/contextual frames.
 
@@ -568,6 +586,7 @@ def build_combined_survey_frame_command(
         "-loglevel",
         "info",
         *(["-threads", str(ffmpeg_threads)] if ffmpeg_threads is not None else []),
+        *_hwaccel_input_options(hwaccel),
         "-i",
         str(media_path),
         "-filter_complex",
@@ -744,6 +763,7 @@ def detect_combined_survey_candidates(
     ffmpeg_threads: int | None = 4,
     ffmpeg_bin: str = "ffmpeg",
     timeout_seconds: float = 600.0,
+    hwaccel: str | None = None,
 ) -> tuple[tuple[SurveyCandidate, ...], tuple[SurveyCandidate, ...]]:
     """Decode hard-cut and adaptive survey branches in one FFmpeg process."""
 
@@ -758,6 +778,7 @@ def detect_combined_survey_candidates(
         video_stream_index=video_stream_index,
         ffmpeg_threads=ffmpeg_threads,
         ffmpeg_bin=ffmpeg_bin,
+        hwaccel=hwaccel,
     )
     stderr = _execute_detection(
         command,
@@ -796,6 +817,7 @@ def detect_combined_survey_frames(
     ffmpeg_threads: int | None = None,
     ffmpeg_bin: str = "ffmpeg",
     timeout_seconds: float = 600.0,
+    hwaccel: str | None = None,
 ) -> tuple[tuple[SurveyCandidate, ...], tuple[SurveyCandidate, ...], tuple[SurveyFrame, ...]]:
     """Run a shared survey and emit exact-safe hard/periodic PNG frames.
 
@@ -821,6 +843,7 @@ def detect_combined_survey_frames(
         video_stream_index=video_stream_index,
         ffmpeg_threads=ffmpeg_threads,
         ffmpeg_bin=ffmpeg_bin,
+        hwaccel=hwaccel,
     )
     stderr = _execute_detection(
         command,
@@ -1058,7 +1081,16 @@ def survey_video_candidates(
     signal_samples: Iterable[SurveySignal] = (),
     chapter_times_ms: Iterable[int] = (),
     speech_reference_times_ms: Iterable[int] = (),
+    hwaccel: str | None = None,
 ) -> tuple[SurveyCandidate, ...]:
+    """Merge safety, detector, and context candidates for one source.
+
+    ``hwaccel`` is an off-by-default experiment knob that only reaches the
+    combined hard-cut/adaptive decode pass.  If the combined graph fails, the
+    guarded single-detector fallbacks deliberately stay in software so a
+    partially supported accelerator can never change measured candidates.
+    """
+
     safety = periodic_candidates(duration_ms, interval_seconds=interval_seconds, strict=strict)
     detected: tuple[SurveyCandidate, ...] = ()
     decoded_adaptive: tuple[SurveyCandidate, ...] = ()
@@ -1072,6 +1104,7 @@ def survey_video_candidates(
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
                 timeout_seconds=timeout_seconds,
+                hwaccel=hwaccel,
             )
         except ValidationFailure:
             # Preserve the exact, independently tested single-detector paths

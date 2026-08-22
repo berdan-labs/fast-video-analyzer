@@ -84,6 +84,7 @@ def test_doctor_reports_bounded_scheduler_settings(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("VSR_ASR_CPU_THREADS", "4")
     monkeypatch.setenv("VSR_FASTER_WHISPER_NUM_WORKERS", "1")
     monkeypatch.setenv("VSR_PARALLEL_VISUAL_SURVEY", "1")
+    monkeypatch.delenv("VSR_SURVEY_HWACCEL", raising=False)
 
     scheduling = doctor_report(output_path=tmp_path, offline=True)["checks"]["scheduling"]
     assert scheduling["status"] == "available"
@@ -101,6 +102,12 @@ def test_doctor_reports_bounded_scheduler_settings(tmp_path: Path, monkeypatch) 
         "validator_metadata_workers": _metadata_verify_workers(),
         "parallel_visual_survey": True,
         "parallel_visual_warmup": False,
+        "survey_hwaccel": {
+            "requested": None,
+            "effective": None,
+            "status": "disabled",
+            "detail": "",
+        },
     }
 
 

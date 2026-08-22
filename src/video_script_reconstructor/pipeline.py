@@ -30,7 +30,7 @@ from . import __version__
 from .audit import audit_project
 from .cache import cache_key
 from .config import config_digest, load_config
-from .errors import InputError, ValidationFailure
+from .errors import BlockedError, InputError, ValidationFailure
 from .manifest import ManifestBuilder
 from .render_markdown import render_to_path
 from .security import (
@@ -643,6 +643,8 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "validator_metadata_workers": _metadata_verify_workers(),
             "parallel_visual_survey": _parallel_visual_survey_enabled(),
             "parallel_visual_warmup": _parallel_visual_warmup_enabled(),
+            # Read-only summary; doctor must never trigger a decode probe.
+            "survey_hwaccel": _survey_hwaccel_telemetry(),
         },
         "fix": (
             "Override VSR_FRAME_EXTRACT_WORKERS, VSR_FRAME_ANALYSIS_WORKERS, "
@@ -2133,6 +2135,7 @@ def _visual_survey_cache_identity(
     speech_reference_times_ms: Sequence[int],
     source_sha256: str | None,
     cache_filename: str = "visual-survey.json",
+    decode_mode: str | None = None,
 ) -> tuple[Path, str, str, str]:
     checkpoints = project_dir / ".state" / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
@@ -2156,6 +2159,11 @@ def _visual_survey_cache_identity(
         "adaptive-fps=2",
         ffmpeg_version,
         __version__,
+        # A hardware-decoded survey must never silently reuse a software
+        # receipt (or vice versa).  The component is appended only for a
+        # non-default decode mode so existing software cache keys stay
+        # byte-identical.
+        *( [f"decode-mode={decode_mode}"] if decode_mode else [] ),
     )
     return checkpoints / cache_filename, key, source_digest, ffmpeg_version
 
@@ -2170,6 +2178,7 @@ def _visual_survey_structural_cache_identity(
     scene_detection: bool,
     adaptive_detection: bool,
     source_sha256: str | None,
+    decode_mode: str | None = None,
 ) -> tuple[Path, str, str, str]:
     """Identify context-free scene/adaptive survey results for reuse.
 
@@ -2190,6 +2199,7 @@ def _visual_survey_structural_cache_identity(
         speech_reference_times_ms=(),
         source_sha256=source_sha256,
         cache_filename="visual-survey-structural.json",
+        decode_mode=decode_mode,
     )
 
 
@@ -2281,8 +2291,15 @@ def _load_or_run_visual_survey(
     adaptive_detection: bool,
     speech_reference_times_ms: Sequence[int] = (),
     source_sha256: str | None = None,
+    decode_mode: str | None = None,
+    hwaccel: str | None = None,
 ) -> tuple[Any, ...]:
-    """Reuse a validated source-keyed survey across downstream rebuilds."""
+    """Reuse a validated source-keyed survey across downstream rebuilds.
+
+    ``decode_mode`` partitions the cache identity so a hardware-decoded
+    receipt can never satisfy a software request, while ``hwaccel`` reaches
+    only the combined detector decode pass.
+    """
 
     from .scene_detection import (
         contextual_candidates,
@@ -2300,6 +2317,7 @@ def _load_or_run_visual_survey(
         adaptive_detection=adaptive_detection,
         speech_reference_times_ms=speech_reference_times_ms,
         source_sha256=source_sha256,
+        decode_mode=decode_mode,
     )
     restored = _restore_visual_survey_cache(
         cache_path, key, source_digest=source_digest, ffmpeg_version=ffmpeg_version
@@ -2316,6 +2334,7 @@ def _load_or_run_visual_survey(
             scene_detection=scene_detection,
             adaptive_detection=adaptive_detection,
             source_sha256=source_sha256,
+            decode_mode=decode_mode,
         )
     )
     structural = _restore_visual_survey_cache(
@@ -2351,6 +2370,7 @@ def _load_or_run_visual_survey(
             ffmpeg_threads=_visual_survey_ffmpeg_threads(),
             timeout_seconds=_visual_survey_timeout_seconds(duration_ms),
             speech_reference_times_ms=(),
+            hwaccel=hwaccel,
         )
         _write_visual_survey_cache(
             structural_path,
@@ -2401,6 +2421,8 @@ def _load_or_run_visual_survey_with_frames(
     periodic_times_ms: Sequence[int],
     frame_output_dir: Path,
     source_sha256: str | None = None,
+    decode_mode: str | None = None,
+    hwaccel: str | None = None,
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     """Run one survey decode and optionally emit exact-safe periodic frames.
 
@@ -2408,6 +2430,8 @@ def _load_or_run_visual_survey_with_frames(
     the hard-cut, adaptive, and periodic branches are measured in the same
     decode; hard-cut and periodic/contextual PNGs were proven pixel-identical
     to guarded exact extraction. Adaptive samples are never reused as evidence.
+    ``decode_mode`` partitions the survey cache identity and ``hwaccel`` is the
+    verified accelerator handed to the combined decode pass only.
     """
 
     from .scene_detection import (
@@ -2432,6 +2456,7 @@ def _load_or_run_visual_survey_with_frames(
         adaptive_detection=adaptive_detection,
         speech_reference_times_ms=speech_reference_times_ms,
         source_sha256=source_sha256,
+        decode_mode=decode_mode,
     )
     restored = _restore_visual_survey_cache(
         cache_path, key, source_digest=source_digest, ffmpeg_version=ffmpeg_version
@@ -2449,6 +2474,7 @@ def _load_or_run_visual_survey_with_frames(
             scene_detection=scene_detection,
             adaptive_detection=adaptive_detection,
             source_sha256=source_sha256,
+            decode_mode=decode_mode,
         )
     )
     structural_restored = _restore_visual_survey_cache(
@@ -2532,6 +2558,7 @@ def _load_or_run_visual_survey_with_frames(
                         ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                         ffmpeg_bin=ffmpeg_path,
                         timeout_seconds=survey_timeout_seconds,
+                        hwaccel=hwaccel,
                     )
                     if attempt_index:
                         LOGGER.info(
@@ -2615,6 +2642,9 @@ def _load_or_run_visual_survey_with_frames(
                 ffmpeg_bin=ffmpeg_path,
                 timeout_seconds=survey_timeout_seconds,
                 speech_reference_times_ms=speech_reference_times_ms,
+                # The combined frame graph already failed; recover with the
+                # independently guarded software survey path.
+                hwaccel=None,
             )
     else:
         candidates = survey_video_candidates(
@@ -2628,6 +2658,8 @@ def _load_or_run_visual_survey_with_frames(
             ffmpeg_bin=ffmpeg_path,
             timeout_seconds=survey_timeout_seconds,
             speech_reference_times_ms=speech_reference_times_ms,
+            # No combined frame graph is active in this branch.
+            hwaccel=None,
         )
     _write_visual_survey_cache(
         cache_path,
@@ -4839,6 +4871,142 @@ def _visual_survey_ffmpeg_threads() -> int:
     return max(1, min(4, (os.cpu_count() or 1) // 2))
 
 
+# Off-by-default hardware-decode experiment for the combined visual survey.
+# ``VSR_SURVEY_HWACCEL`` accepts only explicitly allowlisted FFmpeg hwaccel
+# names; anything else is rejected before a decoder is ever invoked.  The
+# effective mode is resolved per source through a guarded parity probe that
+# decodes one deterministic frame twice (software and hardware) and compares
+# normalized pixel hashes.  Probe outcomes are memoized under a lock and never
+# retried: an unsupported, failing, or pixel-divergent accelerator falls back
+# to software decode for the rest of the process.  The survey cache identity
+# carries the effective decode mode so hardware receipts can never be reused
+# as software evidence or vice versa.
+_SURVEY_HWACCEL_ALLOWLIST = frozenset({"cuda"})
+_SURVEY_HWACCEL_PROBE_LOCK = threading.Lock()
+_SURVEY_HWACCEL_PROBES: dict[tuple[str, str], dict[str, str]] = {}
+
+
+def _survey_hwaccel_request() -> str | None:
+    """Return the normalized ``VSR_SURVEY_HWACCEL`` request, if any."""
+
+    return os.environ.get("VSR_SURVEY_HWACCEL", "").strip().casefold() or None
+
+
+def _probe_survey_hwaccel(mode: str, source: Path) -> dict[str, str]:
+    """Compare one deterministic frame decoded by software and by ``mode``.
+
+    The probe is deliberately minimal: two exact extractions at 0 ms and one
+    normalized pixel-hash comparison.  Any extraction failure, timeout, or
+    pixel divergence marks the mode unavailable instead of guessing.
+    """
+
+    from .frame_extract import extract_frame
+    from .frame_quality import normalized_pixel_hash
+
+    probe_ms = 0
+    with tempfile.TemporaryDirectory(prefix=".vsr-hwaccel-probe-") as temporary:
+        base = Path(temporary)
+        try:
+            software = extract_frame(source, probe_ms, base / "software.png", hwaccel=None)
+            hardware = extract_frame(
+                source,
+                probe_ms,
+                base / f"{safe_slug(mode, fallback='hwaccel')}.png",
+                hwaccel=mode,
+            )
+        except (BlockedError, InputError, OSError, ValidationFailure) as exc:
+            return {"status": "failed", "detail": str(exc)}
+        if normalized_pixel_hash(software.path) != normalized_pixel_hash(hardware.path):
+            return {
+                "status": "mismatch",
+                "detail": (
+                    f"hwaccel {mode} frame at {probe_ms} ms differs from software decode"
+                ),
+            }
+    return {"status": "verified", "detail": ""}
+
+
+def _survey_hwaccel_effective_mode(
+    source: Path,
+    *,
+    source_sha256: str | None = None,
+) -> str | None:
+    """Resolve the opt-in hardware survey decoder behind a guarded parity probe.
+
+    Returns the allowlisted mode only when its memoized probe verified
+    byte-identical pixels against the software decoder for this source digest.
+    Every other outcome fails closed to ``None`` without retrying.
+    """
+
+    requested = _survey_hwaccel_request()
+    if requested is None:
+        return None
+    if requested not in _SURVEY_HWACCEL_ALLOWLIST:
+        LOGGER.warning(
+            "Ignoring unsupported VSR_SURVEY_HWACCEL=%r; allowed values: %s",
+            requested,
+            ", ".join(sorted(_SURVEY_HWACCEL_ALLOWLIST)),
+        )
+        return None
+    digest = source_sha256 or sha256_file(source)
+    memo_key = (requested, digest)
+    # Single-flight resolution: parallel survey workers must not race two
+    # probes for the same source, and a decided source never probes again.
+    with _SURVEY_HWACCEL_PROBE_LOCK:
+        memo = _SURVEY_HWACCEL_PROBES.get(memo_key)
+        if memo is None:
+            memo = _probe_survey_hwaccel(requested, source)
+            _SURVEY_HWACCEL_PROBES[memo_key] = memo
+    if memo["status"] == "verified":
+        LOGGER.info(
+            "Survey hwaccel %r verified against software decode for source %s",
+            requested,
+            digest[:12],
+        )
+        return requested
+    LOGGER.warning(
+        "Survey hwaccel %r is unavailable (%s); using software decode without retry",
+        requested,
+        memo["detail"] or memo["status"],
+    )
+    return None
+
+
+def _survey_hwaccel_telemetry() -> dict[str, Any]:
+    """Summarize the current hwaccel policy and probe outcomes read-only."""
+
+    requested = _survey_hwaccel_request()
+    if requested is None:
+        return {"requested": None, "effective": None, "status": "disabled", "detail": ""}
+    if requested not in _SURVEY_HWACCEL_ALLOWLIST:
+        return {
+            "requested": requested,
+            "effective": None,
+            "status": "rejected",
+            "detail": f"allowed values: {', '.join(sorted(_SURVEY_HWACCEL_ALLOWLIST))}",
+        }
+    with _SURVEY_HWACCEL_PROBE_LOCK:
+        outcomes = [
+            entry for (mode, _digest), entry in _SURVEY_HWACCEL_PROBES.items() if mode == requested
+        ]
+    failed = next((entry for entry in outcomes if entry["status"] != "verified"), None)
+    if failed is not None:
+        return {
+            "requested": requested,
+            "effective": None,
+            "status": failed["status"],
+            "detail": failed["detail"],
+        }
+    if not outcomes:
+        return {"requested": requested, "effective": None, "status": "pending", "detail": ""}
+    return {
+        "requested": requested,
+        "effective": requested,
+        "status": "verified",
+        "detail": "",
+    }
+
+
 def _visual_survey_timeout_seconds(duration_ms: int) -> float:
     """Return a duration-aware wall-clock bound for one survey decode pass.
 
@@ -5318,6 +5486,9 @@ def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
         "visual_shared_cache": _visual_shared_cache_dir() is not None,
         "parallel_visual_survey": _parallel_visual_survey_enabled(duration_ms=duration_ms),
         "parallel_visual_warmup": _parallel_visual_warmup_enabled(duration_ms=duration_ms),
+        # Read-only policy/probe summary. This never invokes the guarded
+        # parity probe; it only reports already-decided outcomes.
+        "survey_hwaccel": _survey_hwaccel_telemetry(),
         "guarded_motion_dedup": _guarded_motion_only_enabled(),
     }
 
@@ -5355,6 +5526,9 @@ def _precompute_visual_survey(
         interval_seconds=interval_seconds,
         strict=strict,
     )
+    # Resolve the opt-in accelerator exactly once per source so every cache
+    # identity and decode pass in this worker shares one decided mode.
+    decode_mode = _survey_hwaccel_effective_mode(source, source_sha256=source_sha256)
     try:
         candidates, shared_frames = _load_or_run_visual_survey_with_frames(
             source,
@@ -5368,6 +5542,8 @@ def _precompute_visual_survey(
             periodic_times_ms=periodic_times,
             frame_output_dir=frame_output_dir,
             source_sha256=source_sha256,
+            decode_mode=decode_mode,
+            hwaccel=decode_mode,
         )
     except Exception:
         shutil.rmtree(frame_output_dir, ignore_errors=True)
@@ -5434,6 +5610,9 @@ def _extract_visual_evidence_legacy(
     initial_context_times = tuple(point for point, _ in requested)
     shared_checkpoint_root = project_dir / ".state" / "checkpoints"
     shared_checkpoint_root.mkdir(parents=True, exist_ok=True)
+    # Resolve the opt-in accelerator exactly once so the survey loader and the
+    # final context-bound cache marker share one decided decode mode.
+    decode_mode = _survey_hwaccel_effective_mode(source, source_sha256=source_sha256)
     if precomputed_survey is None:
         shared_frame_dir = Path(
             tempfile.mkdtemp(prefix=".vsr-survey-frames-", dir=shared_checkpoint_root)
@@ -5466,6 +5645,8 @@ def _extract_visual_evidence_legacy(
             periodic_times_ms=periodic_times,
             frame_output_dir=shared_frame_dir,
             source_sha256=source_sha256,
+            decode_mode=decode_mode,
+            hwaccel=decode_mode,
         )
     else:
         from .scene_detection import contextual_candidates, merge_survey_candidates
@@ -5492,6 +5673,9 @@ def _extract_visual_evidence_legacy(
                 adaptive_detection=frame_difference_enabled,
                 speech_reference_times_ms=initial_context_times,
                 source_sha256=source_sha256,
+                # Match the worker's decided mode so this context-bound marker
+                # can never collide with the software cache identity.
+                decode_mode=decode_mode,
             )
         )
         _write_visual_survey_cache(
