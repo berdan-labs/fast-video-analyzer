@@ -17,6 +17,14 @@ shared-state safety grounds. Security and dependency alerts remain clear; the
 five-hour qualification is still pending an authorized stronger host.
 Owner-only receipts, media, and hardware fingerprints remain outside Git.
 
+The compute-type experiment enablement and cache-identity protection merged as
+PR #62 (`f7d2d4c`) without changing the CUDA `float16` default. A fresh
+30-minute owner-local screening rejected both tested quantized modes: `int8`
+was slower than the matching `float16` ASR control and its normalized transcript
+digest differed, while `int8_float16` also failed the ASR throughput gate. No
+precision default or five-hour performance claim changed; raw receipts remain
+owner-local.
+
 ## Completed
 
 - [x] Establish `uv.lock` as the authoritative development and CI lockfile.
