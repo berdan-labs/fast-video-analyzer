@@ -5,7 +5,12 @@ system. Checked items are present on `main`; unchecked items require an owner
 decision, an external account, or a future focused change. Review this file
 weekly and update it through a pull request.
 
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-22
+
+Review note (2026-08-22): No open issues or pull requests; `main` CI, CodeQL,
+Platform Smoke, and Dependency Audit all passed on `d417d0c`; security and
+dependency alerts are clear; the five-hour performance qualification remains
+pending an authorized stronger host.
 
 ## Completed
 
