@@ -142,6 +142,11 @@ existing policy:
 - `required_runtime_fingerprint_fields` (default `[]`) lists `report.runtime`
   field names that must exist in every supplied report and be identical across
   all of them (for example sanitized host platform or CPU-model fields).
+- `max_peak_rss_bytes` and `max_output_bytes` (unset by default) enforce the
+  documented resource budgets against each report's
+  `performance_summary.peak_rss_bytes` and `performance_summary.output_bytes`.
+  When present, missing measurements or over-budget values reject the report;
+  they never silently pass.
 
 A real three-round hardware policy — one cold report per interleaved round —
 should set `minimum_report_count` to `3`, so a single lucky run can never

@@ -84,6 +84,17 @@ def test_missing_p95_fails_closed() -> None:
     assert "missing timing_summary.p95_seconds" in reasons
 
 
+def test_resource_budgets_fail_closed() -> None:
+    module = _module()
+    policy = _policy() | {"max_peak_rss_bytes": 1000, "max_output_bytes": 1000}
+    report = _report() | {
+        "performance_summary": {"peak_rss_bytes": 1200, "output_bytes": 1100}
+    }
+    reasons = module.evaluate_report(report, policy)
+    assert "performance_summary.peak_rss_bytes exceeds policy budget" in reasons
+    assert "performance_summary.output_bytes exceeds policy budget" in reasons
+
+
 def test_contract_mismatch_and_warm_cache_are_rejected() -> None:
     module = _module()
     report = _report()
