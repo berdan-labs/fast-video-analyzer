@@ -18,6 +18,9 @@ intent.
 
 ### Changed
 
+- Frame deduplication now reuses canonical pixel identity before falling back
+  to perceptual image comparison, reducing redundant image decoding while
+  preserving OCR, sequence-role, and consequential-change protections.
 - Long-running native ASR chunks now emit owner-local progress heartbeats so a
   blocked decoder is distinguishable from a dead process; heartbeats never
   imply chunk completion or alter transcript output.
