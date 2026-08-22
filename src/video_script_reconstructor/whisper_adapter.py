@@ -255,6 +255,14 @@ class FasterWhisperAdapter(ASRAdapter):
             "condition_on_previous_text",
             _env_bool("VSR_FASTER_WHISPER_CONDITION_ON_PREVIOUS_TEXT", False),
         )
+        # Checkpoint identity must describe effective decoder behavior, not
+        # whether a caller supplied a default explicitly. Without this
+        # canonical form, ``{}`` and an equivalent explicit settings mapping
+        # create different cache keys and force an unnecessary full decode.
+        self.checkpoint_decoding_settings = {
+            "vad_filter": bool(effective_vad),
+            "condition_on_previous_text": bool(effective_context),
+        }
         # Include effective decoder policy in both the pipeline run key and
         # the chunk checkpoint key. A safer decoder setting must never reuse
         # audio produced under a hallucination-prone policy.
@@ -880,7 +888,11 @@ def checkpoint_cache_key(
             if getattr(adapter, "inference_mode", "standard") == "batched"
             else None
         ),
-        "decoding_settings": getattr(adapter, "decoding_settings", None),
+        "decoding_settings": getattr(
+            adapter,
+            "checkpoint_decoding_settings",
+            getattr(adapter, "decoding_settings", None),
+        ),
         "cache_identity": getattr(adapter, "cache_identity", None),
     }
     # Do not perturb cache keys for explicitly constructed legacy adapters that

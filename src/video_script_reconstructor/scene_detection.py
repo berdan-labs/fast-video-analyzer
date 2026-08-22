@@ -16,6 +16,13 @@ _SHOWINFO = re.compile(
     r"(?:.*?\bs:\s*(?P<width>\d+)x(?P<height>\d+))?"
 )
 _TIME_BASE = re.compile(r"config in time_base:\s*(?P<base>\d+/\d+)")
+# Container duration can include a small audio/encoder tail after the final
+# decodable video frame.  A periodic request inside that tail is not an
+# approximate frame: it is an invalid request, and the exact extractor is
+# correct to refuse it.  Keep the safety sample one quarter-second inside the
+# declared duration so the strict cadence remains intact without guessing a
+# timestamp.  Structural/contextual candidates are measured independently.
+_PERIODIC_TAIL_GUARD_MS = 250
 
 
 @dataclass(frozen=True)
@@ -238,12 +245,22 @@ def periodic_candidate_times(
     *,
     interval_seconds: float = 30.0,
     strict: bool = True,
+    tail_guard_ms: int = _PERIODIC_TAIL_GUARD_MS,
 ) -> tuple[int, ...]:
-    """Return safety-sampling times while enforcing the strict 30-second ceiling."""
+    """Return safety-sampling times while enforcing the strict 30-second ceiling.
+
+    The declared container duration is not always the timestamp of a
+    decodable video frame (audio padding and muxer tails are common).  When
+    the final periodic point would fall inside ``tail_guard_ms`` of that
+    boundary, move only that point inward.  This preserves the temporal
+    coverage contract and never fabricates a measured frame timestamp.
+    """
     if duration_ms < 0:
         raise InputError("duration_ms cannot be negative")
     if interval_seconds <= 0:
         raise InputError("periodic safety interval must be positive")
+    if tail_guard_ms < 0:
+        raise InputError("periodic tail guard cannot be negative")
     if strict and interval_seconds > 30:
         raise InputError(
             "strict mode requires a periodic safety interval no greater than 30 seconds"
@@ -257,6 +274,14 @@ def periodic_candidate_times(
     # Add a near-tail sample only when the final uncovered span would exceed the interval.
     if duration_ms - times[-1] > interval_ms:
         times.append(max(0, duration_ms - 1))
+    if tail_guard_ms and duration_ms - times[-1] < tail_guard_ms:
+        guarded_tail = max(0, duration_ms - tail_guard_ms)
+        # Remove any prior samples that the inward move passes, then append
+        # the guarded point. This keeps the schedule sorted/unique even when
+        # a caller deliberately chooses an interval shorter than the guard.
+        times = [time_ms for time_ms in times if time_ms <= guarded_tail]
+        if not times or times[-1] != guarded_tail:
+            times.append(guarded_tail)
     return tuple(times)
 
 
@@ -265,6 +290,7 @@ def periodic_candidates(
     *,
     interval_seconds: float = 30.0,
     strict: bool = True,
+    tail_guard_ms: int = _PERIODIC_TAIL_GUARD_MS,
 ) -> tuple[SurveyCandidate, ...]:
     return tuple(
         SurveyCandidate(
@@ -278,7 +304,12 @@ def periodic_candidates(
             timestamp_source="requested-candidate",
         )
         for index, time_ms in enumerate(
-            periodic_candidate_times(duration_ms, interval_seconds=interval_seconds, strict=strict),
+            periodic_candidate_times(
+                duration_ms,
+                interval_seconds=interval_seconds,
+                strict=strict,
+                tail_guard_ms=tail_guard_ms,
+            ),
             1,
         )
     )
@@ -418,9 +449,10 @@ def build_combined_survey_command(
     in stderr even though FFmpeg shares the decoded input through ``split``.
     Both detector branches terminate in ``nullsink`` so an empty branch cannot
     make the null muxer fail and trigger two expensive fallback decodes.  A
-    one-frame synthetic keepalive stream is the sole mapped output; it exists
-    only to keep FFmpeg's output contract valid and is never parsed as a
-    detector measurement.
+    pass-through copy of the decoded input is the sole mapped output.  Mapping
+    the complete input, rather than a short synthetic keepalive, is essential:
+    FFmpeg may otherwise stop the graph before late detector measurements have
+    been produced.
     """
 
     if not 0 <= scene_threshold <= 1:
@@ -434,11 +466,11 @@ def build_combined_survey_command(
     if ffmpeg_threads is not None and ffmpeg_threads <= 0:
         raise InputError("ffmpeg_threads must be positive when provided")
     filter_graph = (
-        f"[0:v:{video_stream_index}]split=2[hard_input][adaptive_input];"
+        f"[0:v:{video_stream_index}]split=3[hard_input][adaptive_input][survey_output];"
         f"[hard_input]select=gt(scene\\,{scene_threshold:.8g}),showinfo@hard,nullsink;"
         f"[adaptive_input]fps={adaptive_sample_fps:.8g},"
         f"select=gt(scene\\,{adaptive_threshold:.8g}),showinfo@adaptive,nullsink;"
-        "color=c=black:s=2x2:r=1:d=1,format=yuv420p[keepalive]"
+        "[survey_output]null[keepalive]"
     )
     return [
         ffmpeg_bin,
@@ -453,8 +485,6 @@ def build_combined_survey_command(
         filter_graph,
         "-map",
         "[keepalive]",
-        "-frames:v",
-        "1",
         "-an",
         "-sn",
         "-f",
@@ -520,7 +550,11 @@ def build_combined_survey_frame_command(
         f"[0:v:{video_stream_index}]split=4[hard_input][adaptive_input][periodic_input][hard_dummy_input];"
         f"[hard_input]select=gt(scene\\,{scene_threshold:.8g}),showinfo@hard[hard_measured];"
         f"[hard_dummy_input]trim=start_frame=0:end_frame=1,setpts=PTS-STARTPTS[hard_dummy];"
-        f"[hard_measured]setpts=PTS-STARTPTS[hard_reset];"
+        # Keep the sentinel's PTS distinct from the first measured cut. FFmpeg
+        # 7.1's VFR image2 muxer drops equal-PTS frames, while newer builds
+        # preserve them; a one-clock-tick offset retains both without changing
+        # the measured candidate timestamps (showinfo is upstream).
+        f"[hard_measured]setpts=PTS-STARTPTS+1/TB[hard_reset];"
         f"[hard_dummy][hard_reset]concat=n=2:v=1:a=0[hard_output];"
         f"[adaptive_input]fps={adaptive_sample_fps:.8g},"
         f"select=gt(scene\\,{adaptive_threshold:.8g}),showinfo@adaptive,nullsink;"
@@ -1020,6 +1054,7 @@ def survey_video_candidates(
     adaptive_sample_fps: float = 2.0,
     ffmpeg_threads: int | None = 4,
     ffmpeg_bin: str = "ffmpeg",
+    timeout_seconds: float = 600.0,
     signal_samples: Iterable[SurveySignal] = (),
     chapter_times_ms: Iterable[int] = (),
     speech_reference_times_ms: Iterable[int] = (),
@@ -1036,16 +1071,19 @@ def survey_video_candidates(
                 adaptive_sample_fps=adaptive_sample_fps,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
         except ValidationFailure:
-            # A branch with no selected frames makes FFmpeg's null muxer return
-            # an empty-stream error. Preserve the exact, independently tested
-            # paths rather than treating an absent candidate as a timestamp.
+            # Preserve the exact, independently tested single-detector paths
+            # if the combined graph cannot be constructed or completed on a
+            # particular FFmpeg build. Never treat a failed/absent measurement
+            # as a candidate timestamp.
             detected = detect_scene_candidates(
                 media_path,
                 threshold=scene_threshold,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
             decoded_adaptive = detect_adaptive_candidates(
                 media_path,
@@ -1053,6 +1091,7 @@ def survey_video_candidates(
                 sample_fps=adaptive_sample_fps,
                 ffmpeg_threads=ffmpeg_threads,
                 ffmpeg_bin=ffmpeg_bin,
+                timeout_seconds=timeout_seconds,
             )
     elif scene_detection:
         detected = detect_scene_candidates(
@@ -1060,6 +1099,7 @@ def survey_video_candidates(
             threshold=scene_threshold,
             ffmpeg_threads=ffmpeg_threads,
             ffmpeg_bin=ffmpeg_bin,
+            timeout_seconds=timeout_seconds,
         )
     elif adaptive_detection:
         decoded_adaptive = detect_adaptive_candidates(
@@ -1068,6 +1108,7 @@ def survey_video_candidates(
             sample_fps=adaptive_sample_fps,
             ffmpeg_threads=ffmpeg_threads,
             ffmpeg_bin=ffmpeg_bin,
+            timeout_seconds=timeout_seconds,
         )
     adaptive = adaptive_signal_candidates(signal_samples)
     context = contextual_candidates(

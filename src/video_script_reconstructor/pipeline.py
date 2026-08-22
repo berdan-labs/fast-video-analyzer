@@ -9,14 +9,16 @@ import logging
 import math
 import os
 import platform
+import queue
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import datetime, timezone
@@ -288,6 +290,10 @@ class _PrecomputedVisualSurvey:
     candidates: tuple[Any, ...]
     shared_frames: tuple[Any, ...]
     shared_frame_dir: Path
+    prefetched_frame_count: int = 0
+    prefetched_batch_count: int = 0
+    prefetch_failed_batch_count: int = 0
+    prefetch_elapsed_seconds: float = 0.0
 
 
 def _now() -> str:
@@ -631,18 +637,22 @@ def doctor_report(*, output_path: Path | None = None, offline: bool = True) -> d
             "ocr_workers": _ocr_workers(),
             "ocr_checkpoint_batch": _ocr_checkpoint_flush_interval(),
             "ocr_batch_size": _ocr_batch_size(),
+            "paddle_ocr_workers": _paddle_ocr_batch_workers(),
             "asr_cpu_threads": _asr_cpu_threads(),
             "asr_num_workers": _faster_whisper_num_workers(),
             "validator_metadata_workers": _metadata_verify_workers(),
             "parallel_visual_survey": _parallel_visual_survey_enabled(),
+            "parallel_visual_warmup": _parallel_visual_warmup_enabled(),
         },
         "fix": (
             "Override VSR_FRAME_EXTRACT_WORKERS, VSR_FRAME_ANALYSIS_WORKERS, "
             "VSR_CROP_PREP_WORKERS, "
             "VSR_SURVEY_FFMPEG_THREADS, VSR_OCR_WORKERS, VSR_OCR_CHECKPOINT_BATCH, "
             "VSR_OCR_BATCH_SIZE, "
+            "VSR_PADDLE_OCR_WORKERS, "
             "VSR_ASR_CPU_THREADS, VSR_FASTER_WHISPER_NUM_WORKERS, or "
-            "VSR_VALIDATOR_METADATA_WORKERS "
+            "VSR_VALIDATOR_METADATA_WORKERS, VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE, or "
+            "VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES "
             "only after a representative offline benchmark."
         ),
     }
@@ -2099,7 +2109,11 @@ def _visual_survey_cache_identity(
     source_digest = source_sha256 or sha256_file(source)
     ffmpeg_version = _tool_version(shutil.which("ffmpeg")) or "unavailable"
     key = cache_key(
-        "visual-survey-v2",
+        # The full-decode detector fix restores hard/adaptive candidates after
+        # the old synthetic keepalive ended early. Version the receipt so a
+        # resume cannot restore that incomplete structural schedule. The v3
+        # tail-guard behavior remains part of this policy.
+        "visual-survey-v4-full-decode",
         source_digest,
         duration_ms,
         round(interval_seconds, 6),
@@ -2305,6 +2319,7 @@ def _load_or_run_visual_survey(
             scene_detection=scene_detection,
             adaptive_detection=adaptive_detection,
             ffmpeg_threads=_visual_survey_ffmpeg_threads(),
+            timeout_seconds=_visual_survey_timeout_seconds(duration_ms),
             speech_reference_times_ms=(),
         )
         _write_visual_survey_cache(
@@ -2369,11 +2384,13 @@ def _load_or_run_visual_survey_with_frames(
         contextual_candidates,
         detect_combined_survey_frames,
         merge_survey_candidates,
+        periodic_candidates,
         survey_video_candidates,
     )
     # Resolve before ASR/visual worker overlap can mutate runtime search paths
     # while faster-whisper registers CUDA DLL folders.
     ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
+    survey_timeout_seconds = _visual_survey_timeout_seconds(duration_ms)
 
     cache_path, key, source_digest, ffmpeg_version = _visual_survey_cache_identity(
         source,
@@ -2478,12 +2495,13 @@ def _load_or_run_visual_survey_with_frames(
                                 shutil.rmtree(stale_path, ignore_errors=True)
                             elif not stale_path.is_symlink():
                                 stale_path.unlink(missing_ok=True)
-                    _hard, _adaptive, emitted = detect_combined_survey_frames(
+                    measured_hard, measured_adaptive, emitted = detect_combined_survey_frames(
                         source,
                         frame_output_dir,
                         emitted_periodic_times,
                         ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                         ffmpeg_bin=ffmpeg_path,
+                        timeout_seconds=survey_timeout_seconds,
                     )
                     if attempt_index:
                         LOGGER.info(
@@ -2508,25 +2526,24 @@ def _load_or_run_visual_survey_with_frames(
                         raise
             if last_emission_error is not None:
                 raise last_emission_error
-            # The frame-emission detector intentionally exposes every raw
-            # adaptive sample so its timing stream can be audited. Those raw
-            # samples are not the canonical candidate policy: the established
-            # survey path applies the adaptive thresholds/clustering rules
-            # that reduce motion noise to protected state changes. Re-run that
-            # inexpensive candidate-only pass and use it as the authority;
-            # the combined pass contributes pixels only. Falling back to the
-            # raw adaptive stream here would turn a 312-frame reconstruction
-            # into 1,000+ frames on ordinary presenter motion.
-            structural_candidates = survey_video_candidates(
-                source,
-                duration_ms=duration_ms,
-                interval_seconds=interval_seconds,
-                strict=strict,
-                scene_detection=scene_detection,
-                adaptive_detection=adaptive_detection,
-                ffmpeg_threads=_visual_survey_ffmpeg_threads(),
-                ffmpeg_bin=ffmpeg_path,
-                speech_reference_times_ms=(),
+            # The frame-emission graph applies the same hard/adaptive detector
+            # filters as the candidate-only graph. Rebuild the canonical
+            # structural policy from those measured streams: add the periodic
+            # safety schedule, then run the same merge/clustering pass used by
+            # ``survey_video_candidates``. This avoids decoding the complete
+            # source a second time. Synthetic late-cut and real 80-minute
+            # parity fixtures require every timestamp, raw PTS, time base,
+            # reason, score, and source label to match across the two graphs.
+            structural_candidates = merge_survey_candidates(
+                (
+                    periodic_candidates(
+                        duration_ms,
+                        interval_seconds=interval_seconds,
+                        strict=strict,
+                    ),
+                    measured_hard,
+                    measured_adaptive,
+                )
             )
             candidates = merge_survey_candidates(
                 (
@@ -2566,6 +2583,7 @@ def _load_or_run_visual_survey_with_frames(
                 adaptive_detection=adaptive_detection,
                 ffmpeg_threads=_visual_survey_ffmpeg_threads(),
                 ffmpeg_bin=ffmpeg_path,
+                timeout_seconds=survey_timeout_seconds,
                 speech_reference_times_ms=speech_reference_times_ms,
             )
     else:
@@ -2578,6 +2596,7 @@ def _load_or_run_visual_survey_with_frames(
             adaptive_detection=adaptive_detection,
             ffmpeg_threads=_visual_survey_ffmpeg_threads(),
             ffmpeg_bin=ffmpeg_path,
+            timeout_seconds=survey_timeout_seconds,
             speech_reference_times_ms=speech_reference_times_ms,
         )
     _write_visual_survey_cache(
@@ -2921,6 +2940,37 @@ def _ocr_batch_size() -> int:
         return default_size
 
 
+def _paddle_ocr_batch_workers(adapter: Any | None = None) -> int:
+    """Return the bounded opt-in fan-out for persistent Paddle OCR batches.
+
+    A Paddle adapter owns a stateful isolated worker, so concurrent requests
+    require independent ``spawn_worker`` instances.  Keep the default at one
+    process for predictable memory use and make the measured two-worker path
+    explicit.  Adapters without the factory retain the sequential path.
+    """
+
+    raw = os.environ.get("VSR_PADDLE_OCR_WORKERS", "").strip()
+    if not raw:
+        return 1
+    try:
+        requested = max(1, min(2, int(raw)))
+    except ValueError:
+        LOGGER.warning("Ignoring invalid VSR_PADDLE_OCR_WORKERS=%r", raw)
+        return 1
+    if requested <= 1 or adapter is None:
+        return requested
+    if not callable(getattr(adapter, "recognize_many", None)) or not callable(
+        getattr(adapter, "spawn_worker", None)
+    ):
+        LOGGER.warning(
+            "VSR_PADDLE_OCR_WORKERS=%d requested but the OCR adapter has no "
+            "independent worker factory; using one batch worker",
+            requested,
+        )
+        return 1
+    return requested
+
+
 def _ocr_shared_cache_limit() -> int:
     """Return the total shared OCR-cache budget in bytes."""
 
@@ -3180,6 +3230,255 @@ def _write_ocr_cache(
     return True
 
 
+class _StreamingOCRPrefetch:
+    """Consume finalized frame callbacks through bounded OCR workers.
+
+    Frame extraction and OCR are independent after a PNG has been atomically
+    materialized.  This queue keeps that overlap bounded and preserves a safe
+    fallback: if an optional worker fails, the canonical OCR pass reruns any
+    missing frame through the normal adapter path.  Fan-out is capped at one
+    in-flight batch per independent adapter, so it cannot create an unbounded
+    process or memory pool.  The class is intentionally private; it is an
+    acceleration layer, not a new evidence contract.
+    """
+
+    def __init__(self, adapter: Any, *, batch_size: int, worker_count: int = 1) -> None:
+        recognize_many = getattr(adapter, "recognize_many", None)
+        if not callable(recognize_many):
+            raise InputError("streaming OCR prefetch requires a batch-capable adapter")
+        self.adapter = adapter
+        self.batch_size = max(1, int(batch_size))
+        self.worker_count = max(1, min(2, int(worker_count)))
+        self._workers: list[Any] = [adapter]
+        self._owned_workers: list[Any] = []
+        if self.worker_count > 1:
+            spawn_worker = getattr(adapter, "spawn_worker", None)
+            try:
+                if not callable(spawn_worker):
+                    raise InputError("OCR adapter cannot create an independent worker")
+                for _ in range(self.worker_count - 1):
+                    worker = spawn_worker()
+                    if worker is adapter or not callable(getattr(worker, "recognize_many", None)):
+                        raise InputError("OCR adapter returned an invalid independent worker")
+                    available = getattr(worker, "available", None)
+                    if callable(available) and not available():
+                        raise InputError("OCR independent worker is unavailable")
+                    self._workers.append(worker)
+                    self._owned_workers.append(worker)
+            except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+                for worker in self._owned_workers:
+                    close = getattr(worker, "close", None)
+                    if callable(close):
+                        close()
+                self._workers = [adapter]
+                self._owned_workers = []
+                self.worker_count = 1
+                LOGGER.warning(
+                    "OCR worker fan-out unavailable; falling back to one worker: %s", exc
+                )
+        self._queue: queue.Queue[Any | None] = queue.Queue(maxsize=self.batch_size * 2)
+        self._observations: dict[str, Any] = {}
+        self._error: BaseException | None = None
+        self._failed = threading.Event()
+        self._closed = False
+        self._submitted_count = 0
+        self._recognized_count = 0
+        self._batch_count = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name="vsr-streaming-ocr",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def submit(self, frame: Any) -> None:
+        """Queue one stable frame without allowing unbounded pending work."""
+
+        if self._closed or self._failed.is_set():
+            return
+        # A recognizer failure can terminate the worker while the producer is
+        # blocked on a full queue.  Timed puts let the producer observe that
+        # terminal state instead of deadlocking the visual stage.
+        while True:
+            if self._closed or self._failed.is_set():
+                return
+            try:
+                self._queue.put(frame, timeout=0.25)
+            except queue.Full:
+                continue
+            self._submitted_count += 1
+            return
+
+    @staticmethod
+    def _valid_frames(batch: Sequence[Any]) -> list[Any]:
+        return [
+            frame
+            for frame in batch
+            if isinstance(getattr(frame, "frame_id", None), str)
+            and Path(getattr(frame, "path", "")).is_file()
+        ]
+
+    @staticmethod
+    def _observation_id(frame: Any) -> str:
+        frame_id = str(getattr(frame, "frame_id", ""))
+        digits = "".join(character for character in frame_id if character.isdigit())
+        return f"P{int(digits):06d}" if digits else "P000000"
+
+    def _recognize_batch(
+        self, worker_index: int, batch: list[Any]
+    ) -> tuple[list[Any], Mapping[str, Any]]:
+        valid = self._valid_frames(batch)
+        if not valid:
+            return [], {}
+        worker = self._workers[worker_index]
+        results = worker.recognize_many(
+            [Path(frame.path) for frame in valid],
+            frame_ids=[str(frame.frame_id) for frame in valid],
+            observation_ids=[self._observation_id(frame) for frame in valid],
+        )
+        if not isinstance(results, Mapping):
+            raise ValidationFailure("streaming OCR adapter returned a non-mapping result")
+        return valid, results
+
+    def _record_batch(self, valid: list[Any], results: Mapping[str, Any]) -> None:
+        if not valid:
+            return
+        recognized = 0
+        for frame in valid:
+            frame_id = str(frame.frame_id)
+            observation = results.get(frame_id)
+            if observation is not None:
+                self._observations[frame_id] = observation
+                recognized += 1
+        self._recognized_count += recognized
+        self._batch_count += 1
+
+    def _fail(self, exc: BaseException) -> None:
+        if self._error is None:
+            self._error = exc
+        self._failed.set()
+
+    def _flush(self, batch: list[Any]) -> None:
+        if not batch or self._failed.is_set():
+            return
+        try:
+            valid, results = self._recognize_batch(0, batch)
+            self._record_batch(valid, results)
+        except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+            self._fail(exc)
+
+    def _run_fanout(self) -> None:
+        """Dispatch at most one batch per independent adapter at a time."""
+
+        executor = ThreadPoolExecutor(
+            max_workers=self.worker_count,
+            thread_name_prefix="vsr-streaming-ocr-batch",
+        )
+        pending: dict[Future[tuple[list[Any], Mapping[str, Any]]], int] = {}
+        available = list(range(self.worker_count))
+
+        def collect(done: Iterable[Future[tuple[list[Any], Mapping[str, Any]]]]) -> None:
+            for future in done:
+                worker_index = pending.pop(future)
+                try:
+                    valid, results = future.result()
+                    self._record_batch(valid, results)
+                    available.append(worker_index)
+                except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+                    self._fail(exc)
+                    for remaining in pending:
+                        remaining.cancel()
+                    raise
+
+        def dispatch(batch: list[Any]) -> None:
+            if not batch or self._failed.is_set():
+                return
+            while not available and pending and not self._failed.is_set():
+                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                collect(done)
+            if self._failed.is_set() or not available:
+                return
+            worker_index = available.pop(0)
+            future = executor.submit(self._recognize_batch, worker_index, batch)
+            pending[future] = worker_index
+
+        batch: list[Any] = []
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    dispatch(batch)
+                    batch = []
+                    while pending and not self._failed.is_set():
+                        done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                        collect(done)
+                    return
+                batch.append(item)
+                if len(batch) >= self.batch_size:
+                    dispatch(batch)
+                    batch = []
+                    if self._failed.is_set():
+                        return
+        except BaseException as exc:  # noqa: BLE001 - optional acceleration boundary
+            self._fail(exc)
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _run(self) -> None:
+        if self.worker_count > 1:
+            self._run_fanout()
+            return
+        batch: list[Any] = []
+        while True:
+            item = self._queue.get()
+            if item is None:
+                self._flush(batch)
+                return
+            batch.append(item)
+            if len(batch) >= self.batch_size:
+                self._flush(batch)
+                batch = []
+                if self._failed.is_set():
+                    return
+
+    def finish(self) -> None:
+        """Stop the worker and wait for all successfully queued OCR batches."""
+
+        if self._closed:
+            return
+        self._closed = True
+        if not self._failed.is_set():
+            # A worker can fail between the state check and this enqueue. Use
+            # timed puts so a full queue cannot strand shutdown indefinitely;
+            # the worker's failure event then lets us abandon the sentinel and
+            # join the already-terminating thread safely.
+            while not self._failed.is_set():
+                try:
+                    self._queue.put(None, timeout=0.25)
+                    break
+                except queue.Full:
+                    continue
+        self._thread.join()
+        for worker in self._owned_workers:
+            close = getattr(worker, "close", None)
+            if callable(close):
+                close()
+
+    @property
+    def observations(self) -> dict[str, Any]:
+        return dict(self._observations)
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {
+            "submitted_count": self._submitted_count,
+            "recognized_count": self._recognized_count,
+            "batch_count": self._batch_count,
+            "worker_count": self.worker_count,
+            "error": str(self._error) if self._error is not None else None,
+        }
+
+
 def _load_or_run_ocr(
     source: Path,
     project_dir: Path,
@@ -3189,6 +3488,8 @@ def _load_or_run_ocr(
     adapter_key: str,
     source_sha256: str | None = None,
     shared_cache_dir: Path | None = None,
+    prefetched_by_frame_id: Mapping[str, Any] | None = None,
+    prefetch_metrics: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Resume completed OCR observations and process only uncached pixels.
 
@@ -3288,10 +3589,27 @@ def _load_or_run_ocr(
             pending.setdefault(frame_key, []).append(index)
 
     representative_indices = [indices[0] for indices in pending.values()]
+    representative_count = len(representative_indices)
     completed_by_key: dict[str, Any] = {}
     batch_method = getattr(adapter, "recognize_many", None)
     ocr_worker_count = 1 if callable(batch_method) else _ocr_workers()
     cache_entries = dict(cached)
+    prefetched_hits = 0
+    prefetched = prefetched_by_frame_id or {}
+    if prefetched and representative_indices:
+        from .ocr import OCRObservation
+
+        remaining_indices: list[int] = []
+        for index in representative_indices:
+            frame_id = str(ordered_frames[index]["frame_id"])
+            observation = prefetched.get(frame_id)
+            if isinstance(observation, OCRObservation):
+                completed_by_key[frame_keys[index]] = observation
+                cache_entries[frame_keys[index]] = observation
+                prefetched_hits += 1
+            else:
+                remaining_indices.append(index)
+        representative_indices = remaining_indices
     checkpoint_flush_count = 0
     checkpoint_write_failures = 0
 
@@ -3451,7 +3769,13 @@ def _load_or_run_ocr(
         "shared_cache_path": str(shared_cache_path) if shared_cache_path is not None else None,
         "cache_hit_count": cache_hits,
         "shared_cache_hit": shared_cache_hit,
-        "cache_miss_count": len(representative_indices),
+        "cache_miss_count": representative_count,
+        "prefetch_hit_count": prefetched_hits,
+        "prefetch_submitted_count": int((prefetch_metrics or {}).get("submitted_count", 0)),
+        "prefetch_recognized_count": int((prefetch_metrics or {}).get("recognized_count", 0)),
+        "prefetch_batch_count": int((prefetch_metrics or {}).get("batch_count", 0)),
+        "prefetch_worker_count": int((prefetch_metrics or {}).get("worker_count", 1)),
+        "prefetch_error": (prefetch_metrics or {}).get("error"),
         "cache_deduplicated_count": max(0, len(pending) - len(representative_indices)),
         "cache_written": cache_written,
         "shared_cache_written": shared_cache_written,
@@ -3485,6 +3809,7 @@ def _load_or_extract_visual_frames(
     shared_frames: Sequence[Any] = (),
     shared_cache_dir: Path | None = None,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[Any], None] | None = None,
 ) -> tuple[Any, ...]:
     """Reuse raw, measured PNG frames across an interrupted visual rebuild.
 
@@ -3511,7 +3836,9 @@ def _load_or_extract_visual_frames(
     # identical receipt into duplicate cache trees when a host is tuned or a
     # resume runs on a machine with a different CPU count.
     key = cache_key(
-        "visual-frames-v2",
+        # Requested schedules now exclude an unmeasurable container tail; do
+        # not restore a frame checkpoint created before that contract change.
+        "visual-frames-v3-tail-guard",
         source_digest,
         duration_ms,
         ordered_times,
@@ -3541,6 +3868,40 @@ def _load_or_extract_visual_frames(
         except OSError as exc:
             LOGGER.warning("Visual shared cache unavailable at %s: %s", candidate_root, exc)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    requested_indexes = {requested_ms: index for index, requested_ms in enumerate(ordered_times)}
+    published_indexes: set[int] = set()
+
+    def publish_frame(frame: Any) -> None:
+        """Expose one measured frame at a stable evidence path for prefetch."""
+
+        if on_frame is None:
+            return
+        requested_ms = getattr(frame, "requested_ms", None)
+        if not isinstance(requested_ms, int):
+            return
+        index = requested_indexes.get(requested_ms)
+        if index is None or index in published_indexes:
+            return
+        frame_id = f"F{index + 1:06d}"
+        destination = output_dir / (
+            f"{frame_id}__{format_frame_timestamp(int(frame.actual_ms))}__full.png"
+        )
+        source_path = Path(frame.path)
+        if source_path.resolve() != destination.resolve():
+            if destination.exists():
+                if normalized_pixel_hash(destination) != normalized_pixel_hash(source_path):
+                    raise ValidationFailure(
+                        f"Streaming frame has conflicting pixels: {destination.name}"
+                    )
+            else:
+                try:
+                    os.link(source_path, destination)
+                except OSError:
+                    _copy_file_atomic(source_path, destination, durable=False)
+        published_indexes.add(index)
+        on_frame(replace(frame, frame_id=frame_id, path=destination.resolve()))
+
     cache_limit = _visual_frame_cache_limit()
     shared_cache_limit = _visual_shared_cache_limit()
     if shared_cache_limit <= 0:
@@ -3661,6 +4022,8 @@ def _load_or_extract_visual_frames(
         if restored is not None:
             LOGGER.info("Reused cross-project visual frame checkpoint: %s", shared_cache_path)
     if restored is not None:
+        for frame in restored:
+            publish_frame(frame)
         return restored
 
     def restore_prior_schedule_frames() -> dict[int, ExtractedFrame]:
@@ -3875,6 +4238,7 @@ def _load_or_extract_visual_frames(
                 except (OSError, ValueError, TypeError, ValidationFailure):
                     continue
                 restored_by_request[int(frame.requested_ms)] = frame
+                publish_frame(frame)
         if restored_by_request:
             LOGGER.info(
                 "Reused %d measured visual frames from prior schedules",
@@ -3963,6 +4327,7 @@ def _load_or_extract_visual_frames(
         ) as pool:
             for index, shared_frame in pool.map(materialize_shared, shared_jobs):
                 extracted_by_index[index] = shared_frame
+                publish_frame(shared_frame)
 
     prior_by_request = restore_prior_schedule_frames()
     for index, requested_ms in enumerate(ordered_times):
@@ -3998,6 +4363,8 @@ def _load_or_extract_visual_frames(
                 extract_kwargs["ffmpeg_bin"] = ffmpeg_path
             if worker_pool is not None and "worker_pool" in extract_parameters:
                 extract_kwargs["worker_pool"] = worker_pool
+            if on_frame is not None and "on_frame" in extract_parameters:
+                extract_kwargs["on_frame"] = publish_frame
             decoded = extract_frames(source, missing_times, pending_dir, **extract_kwargs)
             for (index, _requested_ms), frame in zip(missing, decoded, strict=True):
                 frame_id = f"F{index + 1:06d}"
@@ -4442,6 +4809,36 @@ def _visual_survey_ffmpeg_threads() -> int:
     return max(1, min(4, (os.cpu_count() or 1) // 2))
 
 
+def _visual_survey_timeout_seconds(duration_ms: int) -> float:
+    """Return a duration-aware wall-clock bound for one survey decode pass.
+
+    The combined hard-cut/adaptive/periodic survey decodes the complete source
+    once, so the historical fixed 600-second ceiling killed long recordings
+    before FFmpeg finished.  The computed bound keeps the 600-second budget
+    that already covers up to one hour of media and then scales linearly past
+    it (one budget second per six media seconds), capped at one day so the
+    value stays bounded.  ``VSR_SURVEY_TIMEOUT_SECONDS`` remains an explicit
+    bounded override; empty or invalid values fall back to the computed bound.
+    """
+
+    computed = min(86_400.0, max(600.0, duration_ms / 6_000.0))
+    override = os.environ.get("VSR_SURVEY_TIMEOUT_SECONDS", "").strip()
+    if not override:
+        return computed
+    try:
+        value = float(override)
+    except ValueError:
+        LOGGER.warning("Ignoring invalid VSR_SURVEY_TIMEOUT_SECONDS=%r", override)
+        return computed
+    if not math.isfinite(value) or value <= 0:
+        LOGGER.warning("Ignoring invalid VSR_SURVEY_TIMEOUT_SECONDS=%r", override)
+        return computed
+    if value > 86_400.0:
+        LOGGER.warning("Clamping VSR_SURVEY_TIMEOUT_SECONDS=%s to 86400", value)
+        return 86_400.0
+    return value
+
+
 def _ocr_workers() -> int:
     """Choose a separate bounded pool for independent OCR subprocesses.
 
@@ -4685,6 +5082,188 @@ def _parallel_visual_survey_enabled(
     return shutil.which("nvidia-smi") is not None
 
 
+def _parallel_visual_warmup_enabled(
+    *, duration_ms: int | None = None, automatic_adapter: bool = True
+) -> bool:
+    """Return whether exact survey-frame warmup may overlap local ASR.
+
+    Unlike the transcript-independent survey itself, exact frame warmup is an
+    owner-tuned experiment.  It is therefore explicitly off by default: a
+    caller must opt in after measuring CPU, disk, and ASR contention on the
+    target host.  The warmup never changes the candidate set; it only writes
+    bounded raw-frame checkpoints that the ordinary visual stage may reuse.
+    """
+
+    policy = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP", "off").strip().lower()
+    if policy in {"0", "false", "no", "off", ""}:
+        return False
+    if policy in {"1", "true", "yes", "on"}:
+        return bool(automatic_adapter and (duration_ms is None or duration_ms >= 5 * 60 * 1000))
+    if policy == "auto":
+        # Keep auto deliberately conservative until an owner records a cold
+        # matrix showing that the extra decoder work does not slow ASR or
+        # exceed memory/disk limits.  Explicit ``on`` is the experiment gate.
+        return False
+    LOGGER.warning("Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP=%r", policy)
+    return False
+
+
+def _parallel_visual_warmup_batch_size() -> int:
+    """Return the bounded exact-frame warmup batch size."""
+
+    raw = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE", "64").strip()
+    try:
+        return max(1, min(128, int(raw)))
+    except ValueError:
+        LOGGER.warning(
+            "Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE=%r", raw
+        )
+        return 64
+
+
+def _parallel_visual_warmup_max_frames() -> int:
+    """Return the hard cap for transcript-independent warmup requests."""
+
+    raw = os.environ.get("VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES", "1024").strip()
+    try:
+        return max(0, min(4096, int(raw)))
+    except ValueError:
+        LOGGER.warning(
+            "Ignoring invalid VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES=%r", raw
+        )
+        return 1024
+
+
+def _survey_candidate_point(candidate: Any, *, duration_ms: int) -> int | None:
+    """Resolve a survey candidate exactly as the canonical visual stage does."""
+
+    requested = getattr(candidate, "requested_ms", None)
+    actual = getattr(candidate, "actual_ms", None)
+    point_value = actual if actual is not None else requested
+    if point_value is None:
+        return None
+    try:
+        point = int(point_value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(point, 0), max(duration_ms - 1, 0))
+
+
+def _transcript_independent_warmup_times(
+    candidates: Sequence[Any],
+    shared_frames: Sequence[Any],
+    *,
+    duration_ms: int,
+) -> tuple[int, ...]:
+    """Return exact survey points not already covered by emitted survey PNGs.
+
+    The final visual stage resolves each survey candidate to the same measured
+    ``actual_ms``/requested timestamp.  Prefetching those points through the
+    guarded exact extractor is therefore byte-safe.  Existing shared survey
+    PNGs are intentionally excluded because the final stage still owns and
+    materializes those temporary files.
+    """
+
+    already_emitted: set[int] = set()
+    for frame in shared_frames:
+        branch = getattr(frame, "branch", None)
+        requested = getattr(frame, "requested_ms", None)
+        if branch in {"hard", "periodic"} and isinstance(requested, int):
+            already_emitted.add(int(requested))
+    points = {
+        point
+        for candidate in candidates
+        if (point := _survey_candidate_point(candidate, duration_ms=duration_ms)) is not None
+        and point not in already_emitted
+    }
+    ordered = tuple(sorted(points))
+    limit = _parallel_visual_warmup_max_frames()
+    if limit <= 0 or len(ordered) <= limit:
+        return ordered
+    # This is an acceleration-only cap.  Keep a deterministic temporal spread
+    # and leave all omitted timestamps to the canonical guarded extractor.
+    return _bounded_shared_survey_emission_times(ordered, max_count=limit)
+
+
+def _prefetch_transcript_independent_visual_frames(
+    source: Path,
+    project_dir: Path,
+    *,
+    duration_ms: int,
+    candidates: Sequence[Any],
+    shared_frames: Sequence[Any],
+    frame_output_dir: Path,
+    source_sha256: str | None,
+) -> dict[str, Any]:
+    """Warm exact survey timestamps into bounded schedule checkpoints.
+
+    Each batch has its own schedule-bound checkpoint and disposable output
+    directory.  A failed batch is recorded and ignored; the normal visual
+    stage still extracts any missing timestamp through its authoritative path.
+    """
+
+    times = _transcript_independent_warmup_times(
+        candidates,
+        shared_frames,
+        duration_ms=duration_ms,
+    )
+    prefetched_frame_count = 0
+    prefetched_batch_count = 0
+    prefetch_failed_batch_count = 0
+    first_error: str | None = None
+    if not times or _visual_frame_cache_limit() <= 0:
+        return {
+            "requested_count": len(times),
+            "prefetched_frame_count": prefetched_frame_count,
+            "prefetched_batch_count": prefetched_batch_count,
+            "prefetch_failed_batch_count": prefetch_failed_batch_count,
+            "prefetch_elapsed_seconds": 0.0,
+            "prefetch_error": first_error,
+        }
+
+    started = time.perf_counter()
+    warmup_root = frame_output_dir / "warmup"
+    batch_size = _parallel_visual_warmup_batch_size()
+    for batch_index, start in enumerate(range(0, len(times), batch_size)):
+        batch_times = times[start : start + batch_size]
+        output_dir = warmup_root / f"batch-{batch_index:06d}"
+        try:
+            extracted = _load_or_extract_visual_frames(
+                source,
+                project_dir,
+                output_dir,
+                batch_times,
+                duration_ms=duration_ms,
+                max_workers=_visual_frame_workers(),
+                source_sha256=source_sha256,
+                shared_frames=(),
+                shared_cache_dir=None,
+                worker_pool=None,
+            )
+        except Exception as exc:  # pragma: no cover - FFmpeg/filesystem specific
+            prefetch_failed_batch_count += 1
+            if first_error is None:
+                first_error = str(exc)
+            LOGGER.warning(
+                "Transcript-independent visual warmup batch %d failed; canonical extraction will recover it",
+                batch_index,
+                exc_info=True,
+            )
+        else:
+            prefetched_frame_count += len(extracted)
+            prefetched_batch_count += 1
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+    return {
+        "requested_count": len(times),
+        "prefetched_frame_count": prefetched_frame_count,
+        "prefetched_batch_count": prefetched_batch_count,
+        "prefetch_failed_batch_count": prefetch_failed_batch_count,
+        "prefetch_elapsed_seconds": round(time.perf_counter() - started, 6),
+        "prefetch_error": first_error,
+    }
+
+
 def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
     """Record the bounded scheduling decisions used by this run.
 
@@ -4702,11 +5281,13 @@ def _scheduler_snapshot(*, duration_ms: int | None = None) -> dict[str, Any]:
         "ocr_workers": _ocr_workers(),
         "ocr_checkpoint_batch": _ocr_checkpoint_flush_interval(),
         "ocr_batch_size": _ocr_batch_size(),
+        "paddle_ocr_workers": _paddle_ocr_batch_workers(),
         "asr_cpu_threads": _asr_cpu_threads(),
         "asr_num_workers": _faster_whisper_num_workers(duration_ms=duration_ms),
         "asr_shared_cache": _asr_shared_cache_dir() is not None,
         "visual_shared_cache": _visual_shared_cache_dir() is not None,
         "parallel_visual_survey": _parallel_visual_survey_enabled(duration_ms=duration_ms),
+        "parallel_visual_warmup": _parallel_visual_warmup_enabled(duration_ms=duration_ms),
         "guarded_motion_dedup": _guarded_motion_only_enabled(),
     }
 
@@ -4721,6 +5302,7 @@ def _precompute_visual_survey(
     scene_detection: bool,
     adaptive_detection: bool,
     source_sha256: str | None,
+    prefetch_exact_frames: bool = False,
 ) -> _PrecomputedVisualSurvey:
     """Run the source survey independently of transcript/ASR decoding.
 
@@ -4760,10 +5342,27 @@ def _precompute_visual_survey(
     except Exception:
         shutil.rmtree(frame_output_dir, ignore_errors=True)
         raise
+    prefetch_metrics: dict[str, Any] = {}
+    if prefetch_exact_frames:
+        prefetch_metrics = _prefetch_transcript_independent_visual_frames(
+            source,
+            project_dir,
+            duration_ms=duration_ms,
+            candidates=candidates,
+            shared_frames=shared_frames,
+            frame_output_dir=frame_output_dir,
+            source_sha256=source_sha256,
+        )
     return _PrecomputedVisualSurvey(
         candidates=tuple(candidates),
         shared_frames=tuple(shared_frames),
         shared_frame_dir=frame_output_dir,
+        prefetched_frame_count=int(prefetch_metrics.get("prefetched_frame_count", 0)),
+        prefetched_batch_count=int(prefetch_metrics.get("prefetched_batch_count", 0)),
+        prefetch_failed_batch_count=int(
+            prefetch_metrics.get("prefetch_failed_batch_count", 0)
+        ),
+        prefetch_elapsed_seconds=float(prefetch_metrics.get("prefetch_elapsed_seconds", 0.0)),
     )
 
 
@@ -4782,6 +5381,7 @@ def _extract_visual_evidence_legacy(
     source_sha256: str | None = None,
     precomputed_survey: _PrecomputedVisualSurvey | None = None,
     worker_pool: ThreadPoolExecutor | None = None,
+    frame_callback: Callable[[Any], None] | None = None,
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
@@ -4995,6 +5595,7 @@ def _extract_visual_evidence_legacy(
             shared_frames=shared_frames,
             shared_cache_dir=_visual_shared_cache_dir(),
             worker_pool=worker_pool,
+            on_frame=frame_callback,
         )
     finally:
         shutil.rmtree(shared_frame_dir, ignore_errors=True)
@@ -5326,31 +5927,51 @@ def _extract_visual_evidence(
         except Exception:  # pragma: no cover - optional telemetry boundary
             LOGGER.warning("Visual progress callback failed", exc_info=True)
 
+    adapter = ocr_adapter if ocr_enabled else None
+    prefetch: _StreamingOCRPrefetch | None = None
+    prefetched_by_frame_id: dict[str, Any] = {}
+    prefetch_metrics: dict[str, Any] = {}
+    if adapter is not None and callable(getattr(adapter, "recognize_many", None)):
+        try:
+            prefetch = _StreamingOCRPrefetch(
+                adapter,
+                batch_size=_ocr_batch_size(),
+                worker_count=_paddle_ocr_batch_workers(adapter),
+            )
+        except InputError:
+            LOGGER.info("Streaming OCR prefetch is unavailable for this adapter")
+
     decode_started = time.perf_counter()
-    frames, payloads, revisions, events, reviews = _extract_visual_evidence_legacy(
-        source,
-        project_dir,
-        media_id,
-        duration_ms,
-        blocks,
-        survey_interval_seconds=survey_interval_seconds,
-        strict=strict,
-        ocr_adapter=ocr_adapter,
-        scene_detection_enabled=scene_detection_enabled,
-        frame_difference_enabled=frame_difference_enabled,
-        source_sha256=source_sha256,
-        precomputed_survey=precomputed_survey,
-        worker_pool=worker_pool,
-    )
+    try:
+        frames, payloads, revisions, events, reviews = _extract_visual_evidence_legacy(
+            source,
+            project_dir,
+            media_id,
+            duration_ms,
+            blocks,
+            survey_interval_seconds=survey_interval_seconds,
+            strict=strict,
+            ocr_adapter=ocr_adapter,
+            scene_detection_enabled=scene_detection_enabled,
+            frame_difference_enabled=frame_difference_enabled,
+            source_sha256=source_sha256,
+            precomputed_survey=precomputed_survey,
+            worker_pool=worker_pool,
+            frame_callback=prefetch.submit if prefetch is not None else None,
+        )
+    finally:
+        if prefetch is not None:
+            prefetch.finish()
+            prefetched_by_frame_id = prefetch.observations
+            prefetch_metrics = prefetch.metrics
     emit_progress(
         "frame_decode_completed",
         full_frame_count=len(frames),
         elapsed_seconds=round(time.perf_counter() - decode_started, 6),
+        streaming_ocr_prefetch=prefetch_metrics,
     )
     if not frames:
         return frames, payloads, revisions, events, reviews, []
-
-    adapter = ocr_adapter if ocr_enabled else None
 
     ordered = sorted(frames, key=lambda item: (int(item["actual_ms"]), str(item["frame_id"])))
     quality_by_id: dict[str, Any] = {}
@@ -5374,6 +5995,8 @@ def _extract_visual_evidence(
                 adapter_key=ocr_cache_key,
                 source_sha256=source_sha256,
                 shared_cache_dir=_visual_shared_cache_dir(),
+                prefetched_by_frame_id=prefetched_by_frame_id,
+                prefetch_metrics=prefetch_metrics,
             )
             sequence_results = analyze_frame_sequence_with_hash(
                 [project_dir / str(frame["full_frame_path"]) for frame in ordered],
@@ -5392,6 +6015,8 @@ def _extract_visual_evidence(
                     adapter_key=ocr_cache_key,
                     source_sha256=source_sha256,
                     shared_cache_dir=_visual_shared_cache_dir(),
+                    prefetched_by_frame_id=prefetched_by_frame_id,
+                    prefetch_metrics=prefetch_metrics,
                 )
                 analysis_future = phase_pool.submit(
                     analyze_frame_sequence_with_hash,
@@ -7856,11 +8481,19 @@ def run_pipeline(
                     scene_detection=config.visual.scene_detection,
                     adaptive_detection=config.visual.frame_difference,
                     source_sha256=source_sha256,
+                    prefetch_exact_frames=_parallel_visual_warmup_enabled(
+                        duration_ms=duration_ms_value,
+                        automatic_adapter=asr_adapter is None,
+                    ),
                 )
                 persist_visual_progress(
                     {
                         "event": "survey_parallel_started",
                         "reason": "overlapped source survey with local ASR",
+                        "exact_frame_warmup": _parallel_visual_warmup_enabled(
+                            duration_ms=duration_ms_value,
+                            automatic_adapter=asr_adapter is None,
+                        ),
                         "elapsed_seconds": 0.0,
                     }
                 )
@@ -8052,6 +8685,10 @@ def run_pipeline(
                         "event": "survey_parallel_completed",
                         "shared_frame_count": len(precomputed_visual_survey.shared_frames),
                         "candidate_count": len(precomputed_visual_survey.candidates),
+                        "prefetched_frame_count": precomputed_visual_survey.prefetched_frame_count,
+                        "prefetched_batch_count": precomputed_visual_survey.prefetched_batch_count,
+                        "prefetch_failed_batch_count": precomputed_visual_survey.prefetch_failed_batch_count,
+                        "prefetch_elapsed_seconds": precomputed_visual_survey.prefetch_elapsed_seconds,
                         "elapsed_seconds": round(
                             time.perf_counter() - (parallel_survey_started_at or time.perf_counter()),
                             6,

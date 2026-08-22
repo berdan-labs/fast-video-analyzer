@@ -9,18 +9,137 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import math
+import os
+import platform
+import shutil
 import statistics
+import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from video_script_reconstructor import __version__
 from video_script_reconstructor.pipeline import run_pipeline
 from video_script_reconstructor.resource_usage import resource_snapshot
 from video_script_reconstructor.security import safe_slug
 from video_script_reconstructor.validate_output import validate_project
+
+ROOT = Path(__file__).resolve().parents[1]
+_PACKAGE_NAMES = (
+    "fast-video-analyzer",
+    "faster-whisper",
+    "ctranslate2",
+    "paddlepaddle",
+    "paddleocr",
+)
+_CACHE_DISABLE_FLAGS = (
+    "VSR_DISABLE_ASR_SHARED_CACHE",
+    "VSR_DISABLE_VISUAL_SHARED_CACHE",
+    "VSR_DISABLE_SEMANTIC_SHARED_CACHE",
+)
+_STABLE_QUALITY_LANES = (
+    "transcript_segments",
+    "frames",
+    "ocr_observations",
+    "script_blocks",
+    "timeline",
+    "visual_events",
+    "evidence_image_metadata",
+)
+
+
+def _command_output(name: str, *args: str) -> str | None:
+    executable = shutil.which(name)
+    if executable is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def _package_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for name in _PACKAGE_NAMES:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return versions
+
+
+def _nvidia_gpus(raw: str | None) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    gpus: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) != 3 or not fields[0]:
+            continue
+        try:
+            memory_mib = int(fields[1])
+        except ValueError:
+            memory_mib = None
+        gpus.append(
+            {
+                "name": fields[0],
+                "memory_total_mib": memory_mib,
+                "driver_version": fields[2] or None,
+            }
+        )
+    return gpus
+
+
+def _runtime_summary() -> dict[str, Any]:
+    """Capture comparable host facts without serials, UUIDs, usernames, or paths."""
+
+    git_revision = _command_output("git", "-C", str(ROOT), "rev-parse", "HEAD")
+    ffmpeg_version = _command_output("ffmpeg", "-version")
+    nvidia_rows = _command_output(
+        "nvidia-smi",
+        "--query-gpu=name,memory.total,driver_version",
+        "--format=csv,noheader,nounits",
+    )
+    return {
+        "application_version": __version__,
+        "git_revision": git_revision[:12] if git_revision else None,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "os": platform.system(),
+        "os_release": platform.release(),
+        "machine": platform.machine(),
+        "logical_cpu_count": os.cpu_count(),
+        "ffmpeg_version": ffmpeg_version.splitlines()[0] if ffmpeg_version else None,
+        "gpus": _nvidia_gpus(nvidia_rows),
+        "package_versions": _package_versions(),
+        "shared_cache_disabled": {
+            name: os.environ.get(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+            for name in _CACHE_DISABLE_FLAGS
+        },
+    }
+
+
+def _canonical_digest(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,6 +148,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--workload-id",
+        help="Stable workload identifier for a later owner-local hardware qualification.",
+    )
     parser.add_argument("--subtitle", action="append", type=Path, default=[])
     parser.add_argument("--transcript", type=Path)
     parser.add_argument("--preset", choices=("strict", "balanced"), default="strict")
@@ -257,25 +380,25 @@ def _performance_summary(
 def _quality_summary(project_dir: Path) -> dict[str, Any]:
     """Extract comparable transcript-coverage facts without judging correctness."""
 
+    unavailable = {
+        "available": False,
+        "media_duration_ms": None,
+        "substantive_segment_count": 0,
+        "word_count": 0,
+        "ordered_text_sha256": None,
+        "blocking_failure_count": None,
+        "lane_item_counts": {},
+        "lane_sha256": {},
+        "model_summary_sha256": None,
+        "quality_contract_sha256": None,
+    }
     canonical_path = project_dir / ".state" / "canonical-project.json"
     try:
         canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {
-            "available": False,
-            "substantive_segment_count": 0,
-            "word_count": 0,
-            "ordered_text_sha256": None,
-            "blocking_failure_count": None,
-        }
+        return unavailable
     if not isinstance(canonical, dict):
-        return {
-            "available": False,
-            "substantive_segment_count": 0,
-            "word_count": 0,
-            "ordered_text_sha256": None,
-            "blocking_failure_count": None,
-        }
+        return unavailable
     segments = canonical.get("transcript_segments", [])
     if not isinstance(segments, list):
         segments = []
@@ -296,12 +419,35 @@ def _quality_summary(project_dir: Path) -> dict[str, Any]:
     ).strip()
     audit = canonical.get("audit", {})
     blocking = audit.get("blocking_failures", []) if isinstance(audit, dict) else []
+    media = canonical.get("media", {})
+    duration_ms = media.get("duration_ms") if isinstance(media, dict) else None
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
+        duration_ms = None
+    lanes = {name: canonical.get(name, []) for name in _STABLE_QUALITY_LANES}
+    lane_digests = {name: _canonical_digest(value) for name, value in lanes.items()}
+    lane_counts = {
+        name: len(value) if isinstance(value, (list, dict)) else None
+        for name, value in lanes.items()
+    }
+    model_summary_digest = _canonical_digest(canonical.get("tools_models_summary", {}))
+    quality_contract_digest = _canonical_digest(
+        {
+            "media_duration_ms": duration_ms,
+            "lane_sha256": lane_digests,
+            "model_summary_sha256": model_summary_digest,
+        }
+    )
     return {
         "available": True,
+        "media_duration_ms": duration_ms,
         "substantive_segment_count": len(substantive),
         "word_count": len(words),
         "ordered_text_sha256": hashlib.sha256(ordered_text.encode("utf-8")).hexdigest(),
         "blocking_failure_count": len(blocking) if isinstance(blocking, list) else None,
+        "lane_item_counts": lane_counts,
+        "lane_sha256": lane_digests,
+        "model_summary_sha256": model_summary_digest,
+        "quality_contract_sha256": quality_contract_digest,
     }
 
 
@@ -346,6 +492,7 @@ def benchmark(
     vision_mode: str = "none",
     asr_chunk_seconds: int | None = None,
     asr_overlap_seconds: int | None = None,
+    workload_id: str | None = None,
     resume: bool = True,
     repeat: int = 1,
     asr_adapter: Any | None = None,
@@ -383,11 +530,15 @@ def benchmark(
             )
         )
     latest = dict(iterations[-1])
+    latest["schema_version"] = "1.1"
+    latest["report_kind"] = "pipeline-benchmark"
+    latest["workload_id"] = workload_id
     latest["iterations"] = iterations
     latest["timing_summary"] = summarize_elapsed(
         [float(item["elapsed_seconds"]) for item in iterations]
     )
     latest["validation_valid"] = all(bool(item["validation_valid"]) for item in iterations)
+    latest["runtime"] = _runtime_summary()
     return latest
 
 
@@ -543,10 +694,12 @@ def benchmark_asr_chunk_sweep(
                 "max_word_count": max_words,
             }
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
+        "report_kind": "asr-chunk-sweep",
         "input": str(input_path.resolve()),
         "output_root": str(output_root.resolve()),
         "resume": False,
+        "runtime": _runtime_summary(),
         "reused_faster_whisper_adapter": reusable_adapter is not None,
         "results": results,
         "recommendation": recommendation,
@@ -580,6 +733,7 @@ def main() -> int:
             vision_mode=args.vision_mode,
             asr_chunk_seconds=args.asr_chunk_seconds,
             asr_overlap_seconds=args.asr_overlap_seconds,
+            workload_id=args.workload_id,
             resume=not args.no_resume,
             repeat=args.repeat,
             independent_validation=args.independent_validation,

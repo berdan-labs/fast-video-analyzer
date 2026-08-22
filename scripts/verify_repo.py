@@ -53,7 +53,9 @@ REQUIRED_FILES = (
     "docs/releasing.md",
     "docs/runbooks.md",
     "scripts/backup_repo.py",
+    "scripts/benchmark_pipeline.py",
     "scripts/evaluate_corpus.py",
+    "scripts/qualify_benchmark.py",
     "scripts/run_model_audit.py",
     "scripts/validate_corpus_manifest.py",
     "scripts/validate_performance_manifest.py",
@@ -61,6 +63,7 @@ REQUIRED_FILES = (
     "tests/corpus_manifest.json",
     "tests/model_audit_manifest.json",
     "tests/performance_manifest.json",
+    "tests/qualification_policy.example.json",
     ".python-version",
 )
 

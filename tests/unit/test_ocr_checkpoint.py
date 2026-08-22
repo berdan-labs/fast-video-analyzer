@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,10 +18,120 @@ from video_script_reconstructor.pipeline import (
     _load_or_run_ocr,
     _ocr_checkpoint_flush_interval,
     _ocr_workers,
+    _paddle_ocr_batch_workers,
     _prune_shared_json_cache,
     _restore_ocr_cache,
+    _StreamingOCRPrefetch,
     _write_ocr_cache,
 )
+
+
+def test_streaming_ocr_prefetch_drains_bounded_batches(tmp_path: Path) -> None:
+    adapter = BatchOCRAdapter()
+    frames = []
+    for index in range(3):
+        path = tmp_path / f"frame-{index}.png"
+        path.write_bytes(f"frame-{index}".encode())
+        frames.append(SimpleNamespace(frame_id=f"F{index + 1:06d}", path=path))
+
+    prefetch = _StreamingOCRPrefetch(adapter, batch_size=2)
+    for frame in frames:
+        prefetch.submit(frame)
+    prefetch.finish()
+
+    assert adapter.batch_sizes == [2, 1]
+    assert set(prefetch.observations) == {"F000001", "F000002", "F000003"}
+    assert prefetch.metrics == {
+        "submitted_count": 3,
+        "recognized_count": 3,
+        "batch_count": 2,
+        "worker_count": 1,
+        "error": None,
+    }
+
+
+def test_streaming_ocr_prefetch_fanout_is_bounded_and_complete(tmp_path: Path) -> None:
+    adapter = SpawnableBatchOCRAdapter()
+    frames = []
+    for index in range(5):
+        path = tmp_path / f"fanout-{index}.png"
+        path.write_bytes(f"frame-{index}".encode())
+        frames.append(SimpleNamespace(frame_id=f"F{index + 1:06d}", path=path))
+
+    prefetch = _StreamingOCRPrefetch(adapter, batch_size=2, worker_count=2)
+    for frame in frames:
+        prefetch.submit(frame)
+    prefetch.finish()
+
+    assert set(prefetch.observations) == {frame.frame_id for frame in frames}
+    assert sorted(adapter.batch_sizes) == [1, 2, 2]
+    assert prefetch.metrics == {
+        "submitted_count": 5,
+        "recognized_count": 5,
+        "batch_count": 3,
+        "worker_count": 2,
+        "error": None,
+    }
+
+
+def test_streaming_ocr_prefetch_failure_is_optional_and_non_blocking(tmp_path: Path) -> None:
+    class FailingBatchAdapter(BatchOCRAdapter):
+        def recognize_many(
+            self,
+            images: list[Path],
+            *,
+            frame_ids: list[str],
+            observation_ids: list[str],
+            language: str | None = None,
+        ) -> dict[str, OCRObservation]:
+            raise RuntimeError("fixture streaming failure")
+
+    path = tmp_path / "frame.png"
+    path.write_bytes(b"frame")
+    prefetch = _StreamingOCRPrefetch(FailingBatchAdapter(), batch_size=1)
+    prefetch.submit(SimpleNamespace(frame_id="F000001", path=path))
+    prefetch.submit(SimpleNamespace(frame_id="F000002", path=path))
+    prefetch.finish()
+
+    assert prefetch.observations == {}
+    assert prefetch.metrics["error"] == "fixture streaming failure"
+
+
+def test_paddle_ocr_batch_worker_policy_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VSR_PADDLE_OCR_WORKERS", raising=False)
+    assert _paddle_ocr_batch_workers() == 1
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "999")
+    assert _paddle_ocr_batch_workers() == 2
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "invalid")
+    assert _paddle_ocr_batch_workers() == 1
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "2")
+    assert _paddle_ocr_batch_workers(BatchOCRAdapter()) == 1
+
+
+def test_ocr_checkpoint_accepts_prefetched_observations(tmp_path: Path) -> None:
+    frames = _frames(tmp_path, ["a", "b"])
+    prefetched = {
+        "F000001": _observation("F000001", "P000001", "prefetched-a"),
+        "F000002": _observation("F000002", "P000002", "prefetched-b"),
+    }
+    adapter = BatchOCRAdapter()
+    result, metrics = _load_or_run_ocr(
+        tmp_path / "source.mp4",
+        tmp_path,
+        frames,
+        adapter=adapter,
+        adapter_key="fixture-prefetch",
+        source_sha256="source-digest",
+        prefetched_by_frame_id=prefetched,
+        prefetch_metrics={"submitted_count": 2, "recognized_count": 2, "batch_count": 1},
+    )
+
+    assert adapter.batch_sizes == []
+    assert metrics["prefetch_hit_count"] == 2
+    assert metrics["prefetch_batch_count"] == 1
+    assert metrics["prefetch_recognized_count"] == 2
+    assert result["F000001"].normalized_interpretation == "prefetched-a"
+    assert result["F000001"].observation_id == "O000001"
 
 
 def _observation(frame_id: str, observation_id: str, text: str) -> OCRObservation:
@@ -86,6 +197,24 @@ class BatchOCRAdapter(CountingOCRAdapter):
                 images, frame_ids, observation_ids, strict=True
             )
         }
+
+
+class SpawnableBatchOCRAdapter(BatchOCRAdapter):
+    def __init__(self, *, shared: SpawnableBatchOCRAdapter | None = None) -> None:
+        super().__init__()
+        if shared is not None:
+            self.batch_sizes = shared.batch_sizes
+            self.calls = shared.calls
+        self.closed = False
+
+    def available(self) -> bool:
+        return True
+
+    def spawn_worker(self) -> SpawnableBatchOCRAdapter:
+        return type(self)(shared=self)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FailingOCRAdapter(CountingOCRAdapter):

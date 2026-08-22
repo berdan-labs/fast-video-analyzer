@@ -78,6 +78,33 @@ def test_paddle_ocr_available_requires_both_verified_models(
     assert adapter.available() is False
 
 
+def test_paddle_ocr_spawn_worker_copies_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("video_script_reconstructor.paddle_ocr_adapter.verify_model", _verified)
+    adapter = PaddleOCRV5Adapter(
+        worker_python=sys.executable,
+        model_root="C:/models",
+        detector_name="detector",
+        recognizer_name="recognizer",
+        device="gpu:0",
+        uncertainty_threshold=0.73,
+        timeout_seconds=17.0,
+    )
+
+    child = adapter.spawn_worker()
+
+    assert child is not adapter
+    assert child.worker_python == adapter.worker_python
+    assert child.model_root == adapter.model_root
+    assert child.detector_name == adapter.detector_name
+    assert child.recognizer_name == adapter.recognizer_name
+    assert child.device == adapter.device
+    assert child.uncertainty_threshold == adapter.uncertainty_threshold
+    assert child.timeout_seconds == adapter.timeout_seconds
+    assert child.cache_identity == adapter.cache_identity
+
+
 def test_persistent_worker_reuses_loaded_engine_across_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -102,11 +129,16 @@ def test_persistent_worker_reuses_loaded_engine_across_batches(
         lambda: {"paddleocr": "fixture", "paddlepaddle-gpu": "fixture"},
     )
 
-    def fake_recognize(_ocr: object, image: Path, *, device: str) -> list[dict[str, object]]:
-        calls["images"].append((image, device))
-        return [{"text": image.name, "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}]
+    def fake_recognize(
+        _ocr: object, images: list[Path], *, device: str
+    ) -> list[list[dict[str, object]]]:
+        calls["images"].extend((image, device) for image in images)
+        return [
+            [{"text": image.name, "confidence": 1.0, "bounding_box": [0, 0, 1, 1]}]
+            for image in images
+        ]
 
-    monkeypatch.setattr(paddle_ocr_worker, "_recognize_image", fake_recognize)
+    monkeypatch.setattr(paddle_ocr_worker, "_recognize_images", fake_recognize)
     session = paddle_ocr_worker._PersistentSession()
     common = {
         "mode": "recognize_batch",
@@ -121,3 +153,50 @@ def test_persistent_worker_reuses_loaded_engine_across_batches(
     assert second_result["ok"] is True
     assert calls["loads"] == 1
     assert [item[0] for item in calls["images"]] == [first.resolve(), second.resolve()]
+
+
+def test_worker_uses_one_predictor_call_for_a_bounded_batch(tmp_path: Path) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    calls: list[object] = []
+
+    class Result:
+        def __init__(self, text: str) -> None:
+            self.json = {
+                "res": {
+                    "rec_texts": [text],
+                    "rec_scores": [1.0],
+                    "rec_boxes": [[0, 0, 1, 1]],
+                }
+            }
+
+    class FakeOCR:
+        def predict(self, value: object) -> list[Result]:
+            calls.append(value)
+            assert isinstance(value, list)
+            return [Result(Path(item).name) for item in value]
+
+    result = paddle_ocr_worker._recognize_batch(
+        {
+            "images": [str(first), str(second)],
+            "detector_path": str(tmp_path),
+            "recognizer_path": str(tmp_path),
+            "device": "gpu:0",
+        },
+        ocr=FakeOCR(),
+        loaded_device="gpu:0",
+        loaded_versions={"paddleocr": "fixture"},
+    )
+
+    assert len(calls) == 1
+    assert calls[0] == [str(first.resolve()), str(second.resolve())]
+    assert [item["image_path"] for item in result["items"]] == [
+        str(first.resolve()),
+        str(second.resolve()),
+    ]
+    assert [item["lines"][0]["text"] for item in result["items"]] == [
+        "first.png",
+        "second.png",
+    ]

@@ -186,7 +186,7 @@ Supported operational variables:
 | --- | --- |
 | Output and stores | `VSR_OUTPUT_ROOT`, `VSR_MODEL_ROOT`, `VSR_WORKER_ROOT`, `VSR_TESSERACT_PATH`, `VSR_FASTER_WHISPER_LARGE_V3_PATH` |
 | Source selection | `VSR_PREFER_WHISPER`, `VSR_ASR_LANGUAGE_HINT` |
-| Review/limits | `VSR_SEMANTIC_MAX_PACKETS`, `VSR_HOST_REVIEW_MAX_PACKETS`, `VSR_SEMANTIC_FAILURE_LIMIT`, `VSR_KEEP_COMPLETED_CHECKPOINTS`, `VSR_ASR_PROGRESS_HEARTBEAT_SECONDS` |
+| Review/limits | `VSR_SEMANTIC_MAX_PACKETS`, `VSR_HOST_REVIEW_MAX_PACKETS`, `VSR_SEMANTIC_FAILURE_LIMIT`, `VSR_KEEP_COMPLETED_CHECKPOINTS`, `VSR_ASR_PROGRESS_HEARTBEAT_SECONDS`, `VSR_SURVEY_TIMEOUT_SECONDS` |
 | Worker counts | `VSR_ASR_CPU_THREADS`, `VSR_FASTER_WHISPER_NUM_WORKERS`, `VSR_OCR_WORKERS`, `VSR_OCR_REFRESH_WORKERS`, `VSR_FRAME_EXTRACT_WORKERS`, `VSR_FRAME_ANALYSIS_WORKERS`, `VSR_CROP_PREP_WORKERS`, `VSR_SURVEY_FFMPEG_THREADS`, `VSR_VALIDATOR_METADATA_WORKERS`, `VSR_SEMANTIC_WORKERS` |
 | Cache budgets/locations | `VSR_DISABLE_ASR_SHARED_CACHE`, `VSR_ASR_SHARED_CACHE_DIR`, `VSR_ASR_SHARED_CACHE_MAX_BYTES`, `VSR_DISABLE_VISUAL_SHARED_CACHE`, `VSR_VISUAL_SHARED_CACHE_DIR`, `VSR_VISUAL_SHARED_CACHE_MAX_BYTES`, `VSR_DISABLE_SEMANTIC_SHARED_CACHE`, `VSR_SEMANTIC_SHARED_CACHE_DIR`, `VSR_SEMANTIC_SHARED_CACHE_MAX_BYTES`, `VSR_OCR_CACHE_MAX_BYTES`, `VSR_OCR_SHARED_CACHE_MAX_BYTES`, `VSR_VISUAL_FRAME_CACHE_MAX_BYTES` |
 
@@ -196,6 +196,13 @@ decoder call is running; `0` disables them. Heartbeats do not interrupt,
 retry, or change transcript output and are not evidence that a chunk completed.
 Heartbeat events update only the small progress file; the run manifest remains
 checkpoint-based and is not a heartbeat log.
+
+The visual survey wall-clock bound is duration-aware: media up to one hour
+keeps the historical 600-second budget, longer media scale linearly past it,
+and the bound is capped at one day. `VSR_SURVEY_TIMEOUT_SECONDS` overrides that
+computed bound with a positive number of seconds (clamped to the same cap);
+empty or invalid values fall back to the computed bound. The timeout changes
+only how long one survey decode may run, never sampling or evidence output.
 
 Advanced or compatibility-only variables are recognized but provisional:
 
@@ -221,9 +228,33 @@ VSR_OCR_BATCH_SIZE
 VSR_OCR_CHECKPOINT_BATCH
 VSR_PADDLE_OCR_PERSISTENT_WORKER
 VSR_PADDLE_OCR_PYTHON
+VSR_PADDLE_OCR_WORKERS
 VSR_PARALLEL_VISUAL_SURVEY
+VSR_PARALLEL_VISUAL_WARMUP
+VSR_PARALLEL_VISUAL_WARMUP_BATCH_SIZE
+VSR_PARALLEL_VISUAL_WARMUP_MAX_FRAMES
 VSR_QWEN_SPEECH_PYTHON
 ```
+
+`VSR_PARALLEL_VISUAL_WARMUP=on` is an owner-tuned experiment for long local
+video runs. It asks the transcript-independent survey worker to pre-extract a
+bounded set of exact survey timestamps into schedule-bound raw-frame
+checkpoints while ASR runs. The default is off; omitted or failed batches are
+recovered by the canonical visual extractor, and the switch must not be used
+as a quality or `<15`-minute claim without cold/resume parity, measured PTS and
+PNG checksums, interruption/resume, and peak-resource receipts. The batch-size
+and frame-count variables are bounded acceleration controls, not sampling
+policy controls.
+
+Large sparse final-frame schedules may be extracted through bounded FFmpeg
+concat-seek chunks. This is an automatic execution optimization, not a sampling
+policy: every requested timestamp keeps its own guarded exact-seek window, the
+measured decoder PTS is deterministically restored to the source clock, and PNG
+pixels remain the evidence authority. Unsupported clocks, missing frames,
+non-deterministic ordering, timing outside a guarded window, or chunk failures
+fall back to the existing per-request extraction path. The optimization does
+not change frame IDs, requested timestamps, evidence filenames, or validation
+requirements.
 
 Variables used only by tests or subprocess fixtures are not a user contract:
 
@@ -237,6 +268,13 @@ VSR_RESULT
 
 Other libraries’ environment variables, arbitrary `VSR_*` names, and secrets
 are not supported configuration surfaces.
+
+`VSR_PADDLE_OCR_WORKERS` is an owner-tuned acceleration switch, capped at two
+independent persistent Paddle workers and defaulting to one. It is used only
+when the selected adapter exposes a safe worker factory; otherwise the run
+falls back to one worker. The setting changes scheduling and resource use, not
+the OCR/evidence contract, and should be enabled only after a representative
+parity and memory benchmark on the host.
 
 ## Change and deprecation policy
 

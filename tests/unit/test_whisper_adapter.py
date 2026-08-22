@@ -244,6 +244,47 @@ def test_faster_whisper_inference_mode_changes_checkpoint_identity(tmp_path: Pat
     assert checkpoint_cache_key(standard, **common) != checkpoint_cache_key(batched, **common)
 
 
+def test_faster_whisper_equivalent_decoder_defaults_share_checkpoint_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"media")
+    monkeypatch.delenv("VSR_FASTER_WHISPER_VAD_FILTER", raising=False)
+    monkeypatch.delenv(
+        "VSR_FASTER_WHISPER_CONDITION_ON_PREVIOUS_TEXT", raising=False
+    )
+    implicit = FasterWhisperAdapter(model="local")
+    explicit = FasterWhisperAdapter(
+        model="local",
+        decoding_settings={
+            "vad_filter": True,
+            "condition_on_previous_text": False,
+        },
+    )
+    changed = FasterWhisperAdapter(
+        model="local",
+        decoding_settings={
+            "vad_filter": False,
+            "condition_on_previous_text": False,
+        },
+    )
+    common = {
+        "media_path": media,
+        "interval_start_ms": 0,
+        "interval_end_ms": 1_000,
+        "chunk_ms": 1_000,
+        "overlap_ms": 0,
+        "language": None,
+        "media_sha256": "a" * 64,
+    }
+    assert checkpoint_cache_key(implicit, **common) == checkpoint_cache_key(
+        explicit, **common
+    )
+    assert checkpoint_cache_key(implicit, **common) != checkpoint_cache_key(
+        changed, **common
+    )
+
+
 def test_faster_whisper_worker_count_changes_checkpoint_identity(tmp_path: Path) -> None:
     media = tmp_path / "source.mp4"
     media.write_bytes(b"media")

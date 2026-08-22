@@ -165,6 +165,26 @@ class PaddleOCRV5Adapter(OCRAdapter):
         self.persistent_worker_used = False
         self.persistent_worker_fallback_count = 0
 
+    def spawn_worker(self) -> PaddleOCRV5Adapter:
+        """Create an independent adapter with the identical OCR contract.
+
+        A persistent Paddle worker is stateful and cannot safely serve two
+        requests concurrently.  Fan-out therefore uses independent adapter
+        instances, each with its own subprocess/model lifecycle.  The caller
+        owns the returned adapter and must close it after the bounded work is
+        complete.
+        """
+
+        return type(self)(
+            worker_python=self.worker_python,
+            model_root=self.model_root,
+            detector_name=self.detector_name,
+            recognizer_name=self.recognizer_name,
+            device=self.device,
+            uncertainty_threshold=self.uncertainty_threshold,
+            timeout_seconds=self.timeout_seconds,
+        )
+
     def _verified_models(self) -> tuple[dict[str, Any], dict[str, Any]]:
         if self._statuses is None:
             detector = verify_model(self.detector_name, self.model_root)

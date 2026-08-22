@@ -4,11 +4,12 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -318,6 +319,9 @@ _BATCH_WINDOW_SECONDS = Decimal("0.250")
 _EXACT_SEEK_DENSITY_THRESHOLD = 4.0
 _LONG_SPAN_EXACT_SEEK_MIN_MS = 10 * 60 * 1000
 _LONG_SPAN_EXACT_SEEK_DENSITY_THRESHOLD = 4.0
+_CONCAT_SEEK_MIN_REQUESTS = 16
+_CONCAT_SEEK_CHUNK_SIZE = 64
+_CONCAT_SEEK_CLOCK_MS = 1000
 
 
 def _batch_select_filter(requested_times_ms: Iterable[int]) -> str:
@@ -464,6 +468,244 @@ def build_batch_frame_extraction_command(
     return command
 
 
+def build_concat_seek_frame_extraction_command(
+    schedule_path: Path,
+    output_pattern: Path,
+    *,
+    ffmpeg_threads: int | None = None,
+    ffmpeg_bin: str = "ffmpeg",
+) -> list[str]:
+    """Build a stateful exact-seek command for a prepared concat schedule.
+
+    Every concat entry has an artificial one-second duration. This gives the
+    first valid decoded frame in each independently sought source window a
+    distinct integer clock slot. The stateful selector therefore does constant
+    work per decoded frame instead of evaluating one clause per requested time.
+    """
+
+    if ffmpeg_threads is not None and ffmpeg_threads <= 0:
+        raise InputError("ffmpeg_threads must be positive when provided")
+    select_filter = (
+        "select='concatdec_select*"
+        "(isnan(prev_selected_pts)+gte(t\\,floor(prev_selected_t)+0.9))',showinfo"
+    )
+    return [
+        ffmpeg_bin,
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "info",
+        *(["-threads", str(ffmpeg_threads)] if ffmpeg_threads is not None else []),
+        "-copyts",
+        "-avoid_negative_ts",
+        "disabled",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-segment_time_metadata",
+        "1",
+        "-i",
+        str(schedule_path),
+        "-map",
+        "0:v:0",
+        "-vf",
+        select_filter,
+        "-fps_mode",
+        "vfr",
+        "-an",
+        "-sn",
+        "-c:v",
+        "png",
+        "-start_number",
+        "1",
+        "-y",
+        str(output_pattern),
+    ]
+
+
+def _ffconcat_quote(path: Path) -> str:
+    return path.resolve().as_posix().replace("'", "'\\''")
+
+
+def _round_fraction(value: Fraction) -> int:
+    """Match FFmpeg's nearest rounding for non-negative timestamp rescaling."""
+
+    if value < 0:
+        raise ValidationFailure("Concat seek timestamp rescaling became negative")
+    quotient, remainder = divmod(value.numerator, value.denominator)
+    return quotient + int(remainder * 2 >= value.denominator)
+
+
+def _source_timing_from_concat(
+    timing: DecodedFrameTiming,
+    *,
+    position: int,
+    requested_ms: int,
+) -> DecodedFrameTiming:
+    """Undo the concat demuxer's artificial clock without guessing source PTS."""
+
+    if timing.time_base is None:
+        raise ValidationFailure("Concat frame timing did not report a stream time base")
+    try:
+        time_base = Fraction(timing.time_base)
+    except (ValueError, ZeroDivisionError) as exc:
+        raise ValidationFailure("Concat frame timing reported an invalid time base") from exc
+    requested_pts = _round_fraction(Fraction(requested_ms, 1000) / time_base)
+    segment_base_pts = _round_fraction(
+        Fraction(position * _CONCAT_SEEK_CLOCK_MS, 1000) / time_base
+    )
+    source_pts = timing.raw_pts - segment_base_pts + requested_pts
+    actual_ms = int(
+        (
+            Decimal(source_pts)
+            * Decimal(time_base.numerator)
+            * Decimal(1000)
+            / Decimal(time_base.denominator)
+        ).to_integral_value()
+    )
+    if not requested_ms <= actual_ms < requested_ms + int(_BATCH_WINDOW_SECONDS * 1000):
+        raise ValidationFailure(
+            "Concat seek did not emit the first measurable frame inside its guarded window"
+        )
+    return DecodedFrameTiming(
+        output_index=timing.output_index,
+        raw_pts=source_pts,
+        actual_ms=actual_ms,
+        time_base=timing.time_base,
+        width=timing.width,
+        height=timing.height,
+        timestamp_source=timing.timestamp_source,
+    )
+
+
+def _run_concat_seek_group(
+    media_path: Path,
+    requested_times_ms: tuple[int, ...],
+    output_dir: Path,
+    *,
+    first_frame_number: int,
+    ffmpeg_threads: int | None,
+    ffmpeg_bin: str,
+    timeout_seconds: float,
+) -> tuple[ExtractedFrame, ...]:
+    """Extract a bounded sparse schedule through one exact-seek FFmpeg process."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".vsr-concat-", dir=output_dir) as temporary_name:
+        temporary_dir = Path(temporary_name)
+        schedule_path = temporary_dir / "schedule.ffconcat"
+        output_pattern = temporary_dir / "frame-%06d.png"
+        source = _ffconcat_quote(media_path)
+        lines = ["ffconcat version 1.0"]
+        for requested_ms in requested_times_ms:
+            start = Decimal(requested_ms) / Decimal(1000)
+            end = start + _BATCH_WINDOW_SECONDS
+            lines.extend(
+                (
+                    f"file '{source}'",
+                    f"inpoint {start:f}",
+                    f"outpoint {end:f}",
+                    f"duration {Decimal(_CONCAT_SEEK_CLOCK_MS) / Decimal(1000):f}",
+                )
+            )
+        schedule_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        command = build_concat_seek_frame_extraction_command(
+            schedule_path,
+            output_pattern,
+            ffmpeg_threads=ffmpeg_threads,
+            ffmpeg_bin=ffmpeg_bin,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                shell=False,
+            )
+        except FileNotFoundError as exc:
+            raise BlockedError(f"FFmpeg executable was not found: {ffmpeg_bin}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ValidationFailure(
+                f"Concat seek acceleration exceeded {timeout_seconds:g}s"
+            ) from exc
+        if completed.returncode != 0:
+            detail = re.sub(r"\s+", " ", completed.stderr).strip()[-1000:]
+            raise ValidationFailure(
+                "FFmpeg concat seek acceleration failed with exit code "
+                f"{completed.returncode}: {detail}"
+            )
+        synthetic_timings = parse_showinfo(completed.stderr)
+        files = sorted(temporary_dir.glob("frame-*.png"))
+        if len(synthetic_timings) != len(requested_times_ms) or len(files) != len(
+            requested_times_ms
+        ):
+            raise ValidationFailure(
+                "FFmpeg concat seek acceleration did not emit one measured frame per request"
+            )
+        timings = tuple(
+            _source_timing_from_concat(
+                timing,
+                position=position,
+                requested_ms=requested_ms,
+            )
+            for position, (requested_ms, timing) in enumerate(
+                zip(requested_times_ms, synthetic_timings, strict=True)
+            )
+        )
+        if any(timing.output_index != position for position, timing in enumerate(timings)):
+            raise ValidationFailure("FFmpeg concat seek frame order was not deterministic")
+
+        prepared: list[tuple[ExtractedFrame, Path, Path]] = []
+        from .frame_quality import normalized_pixel_hash
+
+        for offset, (requested_ms, timing, temporary_path) in enumerate(
+            zip(requested_times_ms, timings, files, strict=True)
+        ):
+            if temporary_path.stat().st_size == 0:
+                raise ValidationFailure("FFmpeg concat seek emitted an empty PNG frame")
+            frame_id = f"F{first_frame_number + offset:06d}"
+            final_path = output_dir / (
+                f"{safe_slug(frame_id, fallback='frame')}__"
+                f"{format_frame_timestamp(timing.actual_ms)}__full.png"
+            )
+            if final_path.exists() and normalized_pixel_hash(final_path) != normalized_pixel_hash(
+                temporary_path
+            ):
+                raise ValidationFailure(
+                    f"Existing evidence frame has conflicting pixels: {final_path.name}"
+                )
+            prepared.append(
+                (
+                    ExtractedFrame(
+                        frame_id=frame_id,
+                        path=final_path.resolve(),
+                        requested_ms=requested_ms,
+                        actual_ms=timing.actual_ms,
+                        raw_pts=timing.raw_pts,
+                        time_base=timing.time_base,
+                        frame_index=None,
+                        offset_ms=timing.actual_ms - requested_ms,
+                        timestamp_source=timing.timestamp_source,
+                        width=timing.width,
+                        height=timing.height,
+                    ),
+                    temporary_path,
+                    final_path,
+                )
+            )
+        for _frame, temporary_path, final_path in prepared:
+            if final_path.exists():
+                temporary_path.unlink(missing_ok=True)
+            else:
+                os.replace(temporary_path, final_path)
+        return tuple(frame for frame, _temporary_path, _final_path in prepared)
+
+
 def _run_batch_group(
     media_path: Path,
     requested_times_ms: tuple[int, ...],
@@ -563,6 +805,7 @@ def _extract_frames_batched(
     timeout_seconds: float,
     max_workers: int,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[ExtractedFrame], None] | None = None,
 ) -> tuple[ExtractedFrame, ...]:
     groups = _batch_request_groups(requested_times_ms)
     group_offsets: list[tuple[int, tuple[int, ...]]] = []
@@ -601,6 +844,52 @@ def _extract_frames_batched(
             timeout_seconds=timeout_seconds,
         )
 
+    # Large sparse schedules retain exact input seeks but amortize FFmpeg
+    # process startup through bounded concat-demuxer chunks. Each source window
+    # is independently guarded and its artificial output clock is deterministically
+    # rebased to the measured source PTS. Any unsupported stream/window falls
+    # back to the existing per-request authority without changing the schedule.
+    exact_runs: list[list[tuple[int, int]]] = []
+    for item in exact_offsets:
+        if not exact_runs or item[0] != exact_runs[-1][-1][0] + 1:
+            exact_runs.append([item])
+        else:
+            exact_runs[-1].append(item)
+    concat_runs = [run for run in exact_runs if len(run) >= _CONCAT_SEEK_MIN_REQUESTS]
+    exact_offsets = [
+        item for run in exact_runs if len(run) < _CONCAT_SEEK_MIN_REQUESTS for item in run
+    ]
+    concat_fallback_offsets: list[tuple[int, int]] = []
+    for run in concat_runs:
+        for chunk_start in range(0, len(run), _CONCAT_SEEK_CHUNK_SIZE):
+            chunk = run[chunk_start : chunk_start + _CONCAT_SEEK_CHUNK_SIZE]
+            chunk_offset = chunk[0][0]
+            requested_chunk = tuple(requested_ms for _offset, requested_ms in chunk)
+            try:
+                extracted_chunk = _run_concat_seek_group(
+                    media_path,
+                    requested_chunk,
+                    output_dir,
+                    first_frame_number=first_frame_number + chunk_offset,
+                    ffmpeg_threads=ffmpeg_threads,
+                    ffmpeg_bin=ffmpeg_bin,
+                    timeout_seconds=timeout_seconds,
+                )
+            except ValidationFailure:
+                concat_fallback_offsets.extend(chunk)
+                continue
+            extracted_by_chunk = {
+                offset: extracted
+                for (offset, _requested_ms), extracted in zip(
+                    chunk, extracted_chunk, strict=True
+                )
+            }
+            singleton_results.update(extracted_by_chunk)
+            if on_frame is not None:
+                for extracted in extracted_chunk:
+                    on_frame(extracted)
+    exact_offsets.extend(concat_fallback_offsets)
+
     if exact_offsets:
         with _executor_context(
             worker_pool,
@@ -609,6 +898,8 @@ def _extract_frames_batched(
         ) as pool:
             for group_offset, extracted in pool.map(extract_single, exact_offsets):
                 singleton_results[group_offset] = extracted
+                if on_frame is not None:
+                    on_frame(extracted)
 
     extracted_by_offset: dict[int, ExtractedFrame] = dict(singleton_results)
     # Batch groups have disjoint temporary/output names and independent FFmpeg
@@ -667,6 +958,9 @@ def _extract_frames_batched(
                 extracted_by_offset.update(
                     {group_offset + position: frame for position, frame in enumerate(batch)}
                 )
+                if on_frame is not None:
+                    for frame in batch:
+                        on_frame(frame)
     if batch_fallback_offsets:
         with _executor_context(
             worker_pool,
@@ -675,6 +969,8 @@ def _extract_frames_batched(
         ) as pool:
             for offset, extracted in pool.map(extract_single, batch_fallback_offsets):
                 extracted_by_offset[offset] = extracted
+                if on_frame is not None:
+                    on_frame(extracted)
     return tuple(extracted_by_offset[position] for position in range(len(requested_times_ms)))
 
 
@@ -690,6 +986,7 @@ def extract_frames(
     ffmpeg_threads: int | None = None,
     timeout_seconds: float = 120.0,
     worker_pool: ThreadPoolExecutor | None = None,
+    on_frame: Callable[[ExtractedFrame], None] | None = None,
 ) -> tuple[ExtractedFrame, ...]:
     if len(set(requested_times_ms)) != len(requested_times_ms):
         raise InputError("requested frame times must be unique")
@@ -726,6 +1023,7 @@ def extract_frames(
                 timeout_seconds=max(timeout_seconds, 600.0),
                 max_workers=max_workers,
                 worker_pool=worker_pool,
+                on_frame=on_frame,
             )
         except ValidationFailure:
             # A low-frame-rate/VFR stream can still reject an exact fallback
@@ -761,13 +1059,21 @@ def extract_frames(
     # smallest possible resource footprint.
     indexed = list(enumerate(ordered_times))
     if max_workers == 1 or len(indexed) < 2:
-        return tuple(extract_one(item) for item in indexed)
+        extracted = tuple(extract_one(item) for item in indexed)
+        if on_frame is not None:
+            for frame in extracted:
+                on_frame(frame)
+        return extracted
     with _executor_context(
         worker_pool,
         max_workers=max_workers,
         thread_name_prefix="vsr-frame",
     ) as pool:
-        return tuple(pool.map(extract_one, indexed))
+        extracted = tuple(pool.map(extract_one, indexed))
+    if on_frame is not None:
+        for frame in extracted:
+            on_frame(frame)
+    return extracted
 
 
 def to_frame_observation(
