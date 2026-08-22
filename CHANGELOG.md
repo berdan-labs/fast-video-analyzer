@@ -18,6 +18,8 @@ intent.
 
 ### Changed
 
+- Owner-local qualification policies can now enforce peak-RSS and output-size
+  budgets; missing or over-budget measurements fail closed.
 - Single-image PP-OCRv5 recognition now uses the existing persistent worker
   route, while retaining the isolated-worker fallback and explicit opt-out.
 - Frame deduplication now reuses canonical pixel identity before falling back
