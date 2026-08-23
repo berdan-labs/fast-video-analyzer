@@ -254,44 +254,71 @@ def validate_timeline(
     media_duration_ms: int | None = None,
     require_sorted: bool = True,
 ) -> TimelineValidationReport:
-    """Validate ranges, ordering, media bounds, and untimed provenance."""
+    """Validate ranges, ordering, media bounds, and untimed provenance.
+
+    Runs as one pass over the timeline: timed/untimed counts accumulate
+    inside the loop and adjacent ``timeline_sort_key`` disorder is detected
+    in that same loop. Python's stable sort leaves a sequence unchanged iff
+    every adjacent sort key pair is non-decreasing (equal items always have
+    equal keys), so flagging the first strict key descent is exactly
+    equivalent to comparing against ``sorted`` while avoiding the sorted
+    copy and the equality scan. Raw records that are not ``TimelineItem``
+    instances are still converted as before. The ordering error is appended
+    after the loop so it remains the final error, preserving the historical
+    error order.
+    """
 
     errors: list[str] = []
     warnings: list[str] = []
-    converted: list[TimelineItem] = []
     ids: set[str] = set()
+    timed_count = 0
+    untimed_count = 0
+    previous_key: tuple[int, int, int, int, int, str] | None = None
+    out_of_order = False
     for index, raw in enumerate(timeline):
         item = (
             raw
             if isinstance(raw, TimelineItem)
             else make_timeline_item(raw, str(_get(raw, "kind", "unknown")), index)
         )
-        converted.append(item)
-        if item.timeline_id in ids:
-            errors.append(f"duplicate timeline ID: {item.timeline_id}")
-        ids.add(item.timeline_id)
-        if (item.start_ms is None) != (item.end_ms is None):
-            errors.append(f"{item.timeline_id}: partial timing range")
-        if item.start_ms is None:
+        start_ms = item.start_ms
+        if start_ms is None:
+            untimed_count += 1
+        else:
+            timed_count += 1
+        timeline_id = item.timeline_id
+        if timeline_id in ids:
+            errors.append(f"duplicate timeline ID: {timeline_id}")
+        ids.add(timeline_id)
+        end_ms = item.end_ms
+        if (start_ms is None) != (end_ms is None):
+            errors.append(f"{timeline_id}: partial timing range")
+        if require_sorted and not out_of_order:
+            key = timeline_sort_key(item)
+            if previous_key is not None and key < previous_key:
+                out_of_order = True
+            else:
+                previous_key = key
+        if start_ms is None:
             if item.timing_provenance != "untimed" and "untimed" not in item.timing_provenance:
-                warnings.append(f"{item.timeline_id}: null timing has non-untimed provenance")
+                warnings.append(f"{timeline_id}: null timing has non-untimed provenance")
             continue
-        if item.start_ms < 0 or item.end_ms is None or item.end_ms < item.start_ms:
-            errors.append(f"{item.timeline_id}: invalid timing range")
+        if start_ms < 0 or end_ms is None or end_ms < start_ms:
+            errors.append(f"{timeline_id}: invalid timing range")
         if media_duration_ms is not None and (
-            item.start_ms > media_duration_ms or (item.end_ms or 0) > media_duration_ms
+            start_ms > media_duration_ms or (end_ms or 0) > media_duration_ms
         ):
-            errors.append(f"{item.timeline_id}: timing exceeds media duration")
+            errors.append(f"{timeline_id}: timing exceeds media duration")
         if item.kind == "snapshot" and _get(item.payload, "actual_time_ms") is None:
-            warnings.append(f"{item.timeline_id}: snapshot lacks measured actual frame time")
-    if require_sorted and converted != sorted(converted, key=timeline_sort_key):
+            warnings.append(f"{timeline_id}: snapshot lacks measured actual frame time")
+    if out_of_order:
         errors.append("timeline items are not in canonical chronological order")
     return TimelineValidationReport(
         valid=not errors,
         errors=errors,
         warnings=warnings,
-        timed_count=sum(item.start_ms is not None for item in converted),
-        untimed_count=sum(item.start_ms is None for item in converted),
+        timed_count=timed_count,
+        untimed_count=untimed_count,
     )
 
 
