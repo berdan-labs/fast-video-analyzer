@@ -222,6 +222,15 @@ class PaddleOCRV5Adapter(OCRAdapter):
         self._persistent_disabled = False
         self.persistent_worker_used = False
         self.persistent_worker_fallback_count = 0
+        # Latency instrumentation only. ``batch_roundtrip_*`` measures the full
+        # adapter-to-worker call (queue wait, pipe JSON, worker processing);
+        # ``worker_inference_*`` sums the worker-reported ``elapsed_seconds``
+        # so benchmarks can separate engine time from protocol overhead.
+        # Counters include failed attempts; they never affect results.
+        self.batch_roundtrip_seconds_total = 0.0
+        self.batch_roundtrip_count = 0
+        self.worker_inference_seconds_total = 0.0
+        self.worker_inference_requests = 0
 
     def spawn_worker(self) -> PaddleOCRV5Adapter:
         """Create an independent adapter with the identical OCR contract.
@@ -322,25 +331,41 @@ class PaddleOCRV5Adapter(OCRAdapter):
             raise ValidationFailure(f"PP-OCRv5 worker failed: {detail}")
         return payload
 
+    def _record_worker_elapsed(self, payload: dict[str, Any]) -> None:
+        elapsed = payload.get("elapsed_seconds")
+        if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool):
+            self.worker_inference_seconds_total += float(elapsed)
+            self.worker_inference_requests += 1
+
     def _invoke_batch(self, request: dict[str, Any]) -> dict[str, Any]:
-        enabled = os.environ.get("VSR_PADDLE_OCR_PERSISTENT_WORKER", "1").strip().casefold()
-        if enabled in {"0", "false", "no", "off"} or self._persistent_disabled:
-            return self._invoke(request)
-        if self._persistent_worker is None:
-            self._persistent_worker = _PersistentOCRWorker(self)
+        batch_started = time.perf_counter()
         try:
-            payload = self._persistent_worker.request(request, self.timeout_seconds)
-            self.persistent_worker_used = True
-            return payload
-        except (BlockedError, OSError, ValidationFailure):
-            # A persistent worker is an acceleration layer.  If an older
-            # isolated worker lacks --persistent or exits unexpectedly, retry
-            # this batch through the proven one-shot protocol and disable the
-            # optimization for the remainder of this adapter instance.
-            self._persistent_worker.close()
-            self._persistent_disabled = True
-            self.persistent_worker_fallback_count += 1
-            return self._invoke(request)
+            enabled = os.environ.get("VSR_PADDLE_OCR_PERSISTENT_WORKER", "1").strip().casefold()
+            if enabled in {"0", "false", "no", "off"} or self._persistent_disabled:
+                payload = self._invoke(request)
+                self._record_worker_elapsed(payload)
+                return payload
+            if self._persistent_worker is None:
+                self._persistent_worker = _PersistentOCRWorker(self)
+            try:
+                payload = self._persistent_worker.request(request, self.timeout_seconds)
+                self.persistent_worker_used = True
+                self._record_worker_elapsed(payload)
+                return payload
+            except (BlockedError, OSError, ValidationFailure):
+                # A persistent worker is an acceleration layer.  If an older
+                # isolated worker lacks --persistent or exits unexpectedly, retry
+                # this batch through the proven one-shot protocol and disable the
+                # optimization for the remainder of this adapter instance.
+                self._persistent_worker.close()
+                self._persistent_disabled = True
+                self.persistent_worker_fallback_count += 1
+                payload = self._invoke(request)
+                self._record_worker_elapsed(payload)
+                return payload
+        finally:
+            self.batch_roundtrip_seconds_total += time.perf_counter() - batch_started
+            self.batch_roundtrip_count += 1
 
     def close(self) -> None:
         if self._persistent_worker is not None:

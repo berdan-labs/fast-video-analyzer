@@ -194,6 +194,10 @@ def test_persistent_worker_reuses_loaded_engine_across_batches(
 
     assert first_result["ok"] is True
     assert second_result["ok"] is True
+    assert isinstance(first_result["elapsed_seconds"], float)
+    assert isinstance(first_result["engine_load_seconds"], float)
+    assert isinstance(second_result["elapsed_seconds"], float)
+    assert "engine_load_seconds" not in second_result
     assert calls["loads"] == 1
     assert [item[0] for item in calls["images"]] == [first.resolve(), second.resolve()]
 
@@ -243,6 +247,24 @@ def test_worker_uses_one_predictor_call_for_a_bounded_batch(tmp_path: Path) -> N
         "first.png",
         "second.png",
     ]
+
+
+def test_adapter_accumulates_worker_latency_without_changing_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VSR_PADDLE_OCR_PERSISTENT_WORKER", "0")
+    monkeypatch.setattr("video_script_reconstructor.paddle_ocr_adapter.verify_model", _verified)
+    adapter = PaddleOCRV5Adapter(worker_python=sys.executable)
+    payload = {"ok": True, "elapsed_seconds": 1.5}
+    monkeypatch.setattr(adapter, "_invoke", lambda _request: dict(payload))
+
+    result = adapter._invoke_batch({"mode": "recognize_batch"})
+
+    assert result == payload
+    assert adapter.batch_roundtrip_count == 1
+    assert adapter.batch_roundtrip_seconds_total >= 0.0
+    assert adapter.worker_inference_requests == 1
+    assert adapter.worker_inference_seconds_total == pytest.approx(1.5)
 
 
 class _StubPersistentAdapter:

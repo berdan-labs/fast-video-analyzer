@@ -3341,6 +3341,7 @@ class _StreamingOCRPrefetch:
                 )
         self._queue: queue.Queue[Any | None] = queue.Queue(maxsize=self.batch_size * 2)
         self._observations: dict[str, Any] = {}
+        self._recognize_seconds: list[float] = []
         self._error: BaseException | None = None
         self._failed = threading.Event()
         self._closed = False
@@ -3394,11 +3395,13 @@ class _StreamingOCRPrefetch:
         if not valid:
             return [], {}
         worker = self._workers[worker_index]
+        recognize_started = time.perf_counter()
         results = worker.recognize_many(
             [Path(frame.path) for frame in valid],
             frame_ids=[str(frame.frame_id) for frame in valid],
             observation_ids=[self._observation_id(frame) for frame in valid],
         )
+        self._recognize_seconds.append(time.perf_counter() - recognize_started)
         if not isinstance(results, Mapping):
             raise ValidationFailure("streaming OCR adapter returned a non-mapping result")
         return valid, results
@@ -3538,6 +3541,7 @@ class _StreamingOCRPrefetch:
             "recognized_count": self._recognized_count,
             "batch_count": self._batch_count,
             "worker_count": self.worker_count,
+            "recognize_seconds_total": round(sum(self._recognize_seconds), 6),
             "error": str(self._error) if self._error is not None else None,
         }
 
@@ -3695,13 +3699,16 @@ def _load_or_run_ocr(
         representative_indices = remaining_indices
     checkpoint_flush_count = 0
     checkpoint_write_failures = 0
+    checkpoint_flush_seconds = 0.0
+    metric_adapters: list[Any] = [adapter]
 
     def flush_incremental_checkpoint() -> None:
         """Persist local completed work without making acceleration mandatory."""
 
-        nonlocal checkpoint_flush_count, checkpoint_write_failures
+        nonlocal checkpoint_flush_count, checkpoint_write_failures, checkpoint_flush_seconds
         if not cache_entries or cache_limit <= 0:
             return
+        flush_started = time.perf_counter()
         try:
             if _write_ocr_cache(
                 cache_path,
@@ -3715,6 +3722,8 @@ def _load_or_run_ocr(
         except (OSError, TypeError, ValueError) as exc:
             checkpoint_write_failures += 1
             LOGGER.warning("Unable to persist incremental OCR checkpoint: %s", exc)
+        finally:
+            checkpoint_flush_seconds += time.perf_counter() - flush_started
 
     if callable(batch_method) and representative_indices:
         # Production Paddle OCR loads a detector/recognizer worker once per
@@ -3789,6 +3798,7 @@ def _load_or_run_ocr(
                             close()
                         raise
                     shard_workers.append(worker)
+                    metric_adapters.append(worker)
 
                 def recognize_shard_batch(
                     worker: Any,
@@ -3983,6 +3993,9 @@ def _load_or_run_ocr(
         "prefetch_submitted_count": int((prefetch_metrics or {}).get("submitted_count", 0)),
         "prefetch_recognized_count": int((prefetch_metrics or {}).get("recognized_count", 0)),
         "prefetch_batch_count": int((prefetch_metrics or {}).get("batch_count", 0)),
+        "prefetch_recognize_seconds": float(
+            (prefetch_metrics or {}).get("recognize_seconds_total", 0.0) or 0.0
+        ),
         "prefetch_worker_count": int((prefetch_metrics or {}).get("worker_count", 1)),
         "prefetch_error": (prefetch_metrics or {}).get("error"),
         "cache_deduplicated_count": max(0, len(pending) - len(representative_indices)),
@@ -3991,6 +4004,21 @@ def _load_or_run_ocr(
         "cache_reused_without_rewrite": cache_reused_without_rewrite,
         "checkpoint_flush_count": checkpoint_flush_count,
         "checkpoint_write_failures": checkpoint_write_failures,
+        "checkpoint_flush_seconds": round(checkpoint_flush_seconds, 6),
+        "ocr_batch_roundtrip_seconds": round(
+            sum(float(getattr(item, "batch_roundtrip_seconds_total", 0.0) or 0.0) for item in metric_adapters),
+            6,
+        ),
+        "ocr_batch_roundtrip_count": sum(
+            int(getattr(item, "batch_roundtrip_count", 0) or 0) for item in metric_adapters
+        ),
+        "ocr_worker_inference_seconds": round(
+            sum(float(getattr(item, "worker_inference_seconds_total", 0.0) or 0.0) for item in metric_adapters),
+            6,
+        ),
+        "ocr_worker_inference_count": sum(
+            int(getattr(item, "worker_inference_requests", 0) or 0) for item in metric_adapters
+        ),
         "worker_count": (
             min(
                 ocr_worker_count,
