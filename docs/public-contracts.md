@@ -279,10 +279,13 @@ parity and memory benchmark on the host.
 
 `VSR_PADDLE_OCR_PREFETCH_WORKERS` is a provisional resource-control override
 for streaming OCR prefetch. It accepts only `1` or `2`; unset or invalid values
-retain the `VSR_PADDLE_OCR_WORKERS` policy. Setting it to `1` can avoid GPU
-host-allocation failures on long media while preserving the exact OCR/evidence
-contract. It is opt-in and requires a representative long-workload parity and
-memory benchmark before use.
+retain the `VSR_PADDLE_OCR_WORKERS` policy. When the caller explicitly enables
+multiple Paddle workers and leaves this override unset, media of at least 20
+minutes automatically uses one prefetch worker; shorter media retain the
+configured fan-out. Setting it explicitly remains authoritative. This policy
+can avoid GPU host-allocation failures on long media while preserving the exact
+OCR/evidence contract, but it still requires representative long-workload
+parity and memory benchmarks before a host is qualified.
 
 ## Change and deprecation policy
 
