@@ -3067,6 +3067,24 @@ def _streaming_ocr_prefetch_worker_override() -> int | None:
     )
 
 
+def _streaming_ocr_prefetch_workers(*, adapter: Any, duration_ms: int) -> int:
+    """Choose a bounded prefetch fan-out for the current media duration.
+
+    Two-worker Paddle fan-out remains an explicit opt-in. For long media, keep
+    the streaming prefetch at one worker unless the caller explicitly chooses
+    a value with ``VSR_PADDLE_OCR_PREFETCH_WORKERS``. This avoids the measured
+    GPU host-allocation failure while leaving short-media behavior unchanged.
+    """
+
+    override = _streaming_ocr_prefetch_worker_override()
+    if override is not None:
+        return override
+    configured = _paddle_ocr_batch_workers(adapter)
+    if configured > 1 and duration_ms >= 20 * 60 * 1000:
+        return 1
+    return configured
+
+
 def _ocr_shared_cache_limit() -> int:
     """Return the total shared OCR-cache budget in bytes."""
 
@@ -6362,14 +6380,11 @@ def _extract_visual_evidence(
     prefetch_metrics: dict[str, Any] = {}
     if adapter is not None and callable(getattr(adapter, "recognize_many", None)):
         try:
-            prefetch_worker_override = _streaming_ocr_prefetch_worker_override()
             prefetch = _StreamingOCRPrefetch(
                 adapter,
                 batch_size=_ocr_batch_size(),
-                worker_count=(
-                    prefetch_worker_override
-                    if prefetch_worker_override is not None
-                    else _paddle_ocr_batch_workers(adapter)
+                worker_count=_streaming_ocr_prefetch_workers(
+                    adapter=adapter, duration_ms=duration_ms
                 ),
             )
         except InputError:

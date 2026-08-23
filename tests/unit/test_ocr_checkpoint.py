@@ -26,6 +26,7 @@ from video_script_reconstructor.pipeline import (
     _prune_shared_json_cache,
     _restore_ocr_cache,
     _streaming_ocr_prefetch_worker_override,
+    _streaming_ocr_prefetch_workers,
     _StreamingOCRPrefetch,
     _write_ocr_cache,
 )
@@ -198,6 +199,20 @@ def test_streaming_prefetch_worker_env_policy_is_bounded(
     for invalid in ("0", "3", "invalid", ""):
         monkeypatch.setenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", invalid)
         assert _streaming_ocr_prefetch_worker_override() is None
+
+
+def test_streaming_prefetch_automatically_bounds_long_opt_in_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = SpawnableBatchOCRAdapter()
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "2")
+    monkeypatch.delenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", raising=False)
+
+    assert _streaming_ocr_prefetch_workers(adapter=adapter, duration_ms=5 * 60 * 1000) == 2
+    assert _streaming_ocr_prefetch_workers(adapter=adapter, duration_ms=20 * 60 * 1000) == 1
+
+    monkeypatch.setenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", "2")
+    assert _streaming_ocr_prefetch_workers(adapter=adapter, duration_ms=30 * 60 * 1000) == 2
 
 
 def test_partition_round_robin_is_deterministic_and_total() -> None:
