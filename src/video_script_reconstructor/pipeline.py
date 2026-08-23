@@ -3034,6 +3034,39 @@ def _paddle_ocr_batch_workers(adapter: Any | None = None) -> int:
     return requested
 
 
+def _parse_streaming_prefetch_worker_override(raw: str | None) -> int | None:
+    """Return the validated streaming OCR prefetch worker override.
+
+    The opt-in ``VSR_PADDLE_OCR_PREFETCH_WORKERS`` gate bounds the streaming
+    prefetch fan-out to one or two workers so a long workload cannot grow the
+    host-allocation footprint.  Unset, empty, or invalid values are ignored
+    with a warning and the caller keeps its default worker policy.
+    """
+
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        requested = int(text)
+    except ValueError:
+        LOGGER.warning("Ignoring invalid VSR_PADDLE_OCR_PREFETCH_WORKERS=%r", text)
+        return None
+    if requested not in (1, 2):
+        LOGGER.warning("Ignoring invalid VSR_PADDLE_OCR_PREFETCH_WORKERS=%r", text)
+        return None
+    return requested
+
+
+def _streaming_ocr_prefetch_worker_override() -> int | None:
+    """Return the parsed prefetch worker override, or ``None`` when unset."""
+
+    return _parse_streaming_prefetch_worker_override(
+        os.environ.get("VSR_PADDLE_OCR_PREFETCH_WORKERS")
+    )
+
+
 def _ocr_shared_cache_limit() -> int:
     """Return the total shared OCR-cache budget in bytes."""
 
@@ -6329,10 +6362,15 @@ def _extract_visual_evidence(
     prefetch_metrics: dict[str, Any] = {}
     if adapter is not None and callable(getattr(adapter, "recognize_many", None)):
         try:
+            prefetch_worker_override = _streaming_ocr_prefetch_worker_override()
             prefetch = _StreamingOCRPrefetch(
                 adapter,
                 batch_size=_ocr_batch_size(),
-                worker_count=_paddle_ocr_batch_workers(adapter),
+                worker_count=(
+                    prefetch_worker_override
+                    if prefetch_worker_override is not None
+                    else _paddle_ocr_batch_workers(adapter)
+                ),
             )
         except InputError:
             LOGGER.info("Streaming OCR prefetch is unavailable for this adapter")
