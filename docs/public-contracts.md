@@ -287,6 +287,13 @@ can avoid GPU host-allocation failures on long media while preserving the exact
 OCR/evidence contract, but it still requires representative long-workload
 parity and memory benchmarks before a host is qualified.
 
+When visual shared caching is enabled, a valid OCR receipt for the exact source,
+adapter identity, and package version suppresses redundant streaming OCR
+prefetch. The normal OCR cache loader remains authoritative and fills any
+missing observations; invalid, stale, or unavailable receipts retain the
+ordinary prefetch path. This is an execution optimization only and does not
+change the OCR/evidence output contract.
+
 ## Change and deprecation policy
 
 For a stable surface, a change requires a focused issue or PR, a regression or

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import video_script_reconstructor.pipeline as pipeline_module
+from video_script_reconstructor.cache import cache_key
 from video_script_reconstructor.errors import BlockedError, ValidationFailure
 from video_script_reconstructor.ocr import (
     OCRAdapter,
@@ -17,7 +18,9 @@ from video_script_reconstructor.ocr import (
     serialize_observation,
 )
 from video_script_reconstructor.pipeline import (
+    _has_valid_shared_ocr_receipt,
     _load_or_run_ocr,
+    _ocr_cache_adapter_identity,
     _ocr_checkpoint_flush_interval,
     _ocr_workers,
     _paddle_ocr_batch_workers,
@@ -30,6 +33,47 @@ from video_script_reconstructor.pipeline import (
     _StreamingOCRPrefetch,
     _write_ocr_cache,
 )
+
+
+def test_shared_ocr_prefetch_probe_accepts_only_valid_receipt(tmp_path: Path) -> None:
+    adapter = BatchOCRAdapter()
+    source_digest = "source-digest"
+    adapter_identity = _ocr_cache_adapter_identity(adapter, "probe")
+    checkpoint_key = cache_key(
+        "ocr-observations-v1",
+        source_digest,
+        adapter_identity,
+        pipeline_module.__version__,
+    )
+    shared = tmp_path / "shared"
+    assert not _has_valid_shared_ocr_receipt(
+        source_digest=source_digest,
+        adapter=adapter,
+        adapter_key="probe",
+        shared_cache_dir=shared,
+    )
+    path = shared / "ocr" / f"{checkpoint_key}.json"
+    assert _write_ocr_cache(
+        path,
+        cache_key_value=checkpoint_key,
+        source_digest=source_digest,
+        adapter_identity=adapter_identity,
+        entries={"pixel-hash": None},
+        cache_limit=10_000,
+    )
+    assert _has_valid_shared_ocr_receipt(
+        source_digest=source_digest,
+        adapter=adapter,
+        adapter_key="probe",
+        shared_cache_dir=shared,
+    )
+    path.write_text("{corrupt", encoding="utf-8")
+    assert not _has_valid_shared_ocr_receipt(
+        source_digest=source_digest,
+        adapter=adapter,
+        adapter_key="probe",
+        shared_cache_dir=shared,
+    )
 
 
 def test_streaming_ocr_prefetch_drains_bounded_batches(tmp_path: Path) -> None:
