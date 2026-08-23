@@ -21,9 +21,11 @@ from video_script_reconstructor.pipeline import (
     _ocr_checkpoint_flush_interval,
     _ocr_workers,
     _paddle_ocr_batch_workers,
+    _parse_streaming_prefetch_worker_override,
     _partition_round_robin,
     _prune_shared_json_cache,
     _restore_ocr_cache,
+    _streaming_ocr_prefetch_worker_override,
     _StreamingOCRPrefetch,
     _write_ocr_cache,
 )
@@ -168,6 +170,34 @@ def test_paddle_ocr_batch_worker_policy_is_bounded(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "4")
     assert _paddle_ocr_batch_workers(BatchOCRAdapter()) == 1
     assert _paddle_ocr_batch_workers(SpawnableBatchOCRAdapter()) == 2
+
+
+def test_streaming_prefetch_worker_override_parser_is_strict_and_safe() -> None:
+    """Only 1 or 2 are valid; everything else falls back to the default policy."""
+
+    assert _parse_streaming_prefetch_worker_override(None) is None
+    assert _parse_streaming_prefetch_worker_override("") is None
+    assert _parse_streaming_prefetch_worker_override("   ") is None
+    assert _parse_streaming_prefetch_worker_override("1") == 1
+    assert _parse_streaming_prefetch_worker_override(" 2 ") == 2
+    for invalid in ("0", "3", "-1", "2.5", "two", "invalid"):
+        assert _parse_streaming_prefetch_worker_override(invalid) is None
+
+
+def test_streaming_prefetch_worker_env_policy_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset keeps the default path; valid values gate the prefetch fan-out."""
+
+    monkeypatch.delenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", raising=False)
+    assert _streaming_ocr_prefetch_worker_override() is None
+    monkeypatch.setenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", "2")
+    assert _streaming_ocr_prefetch_worker_override() == 2
+    monkeypatch.setenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", "1")
+    assert _streaming_ocr_prefetch_worker_override() == 1
+    for invalid in ("0", "3", "invalid", ""):
+        monkeypatch.setenv("VSR_PADDLE_OCR_PREFETCH_WORKERS", invalid)
+        assert _streaming_ocr_prefetch_worker_override() is None
 
 
 def test_partition_round_robin_is_deterministic_and_total() -> None:

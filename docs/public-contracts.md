@@ -228,6 +228,7 @@ VSR_OCR_BATCH_SIZE
 VSR_OCR_CHECKPOINT_BATCH
 VSR_PADDLE_OCR_PERSISTENT_WORKER
 VSR_PADDLE_OCR_PYTHON
+VSR_PADDLE_OCR_PREFETCH_WORKERS
 VSR_PADDLE_OCR_WORKERS
 VSR_PARALLEL_VISUAL_SURVEY
 VSR_PARALLEL_VISUAL_WARMUP
@@ -275,6 +276,13 @@ when the selected adapter exposes a safe worker factory; otherwise the run
 falls back to one worker. The setting changes scheduling and resource use, not
 the OCR/evidence contract, and should be enabled only after a representative
 parity and memory benchmark on the host.
+
+`VSR_PADDLE_OCR_PREFETCH_WORKERS` is a provisional resource-control override
+for streaming OCR prefetch. It accepts only `1` or `2`; unset or invalid values
+retain the `VSR_PADDLE_OCR_WORKERS` policy. Setting it to `1` can avoid GPU
+host-allocation failures on long media while preserving the exact OCR/evidence
+contract. It is opt-in and requires a representative long-workload parity and
+memory benchmark before use.
 
 ## Change and deprecation policy
 
