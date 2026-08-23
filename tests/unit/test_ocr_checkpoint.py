@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,8 +49,10 @@ def test_streaming_ocr_prefetch_drains_bounded_batches(tmp_path: Path) -> None:
         "recognized_count": 3,
         "batch_count": 2,
         "worker_count": 1,
+        "recognize_seconds_total": prefetch.metrics["recognize_seconds_total"],
         "error": None,
     }
+    assert prefetch.metrics["recognize_seconds_total"] >= 0.0
 
 
 def test_streaming_ocr_prefetch_fanout_is_bounded_and_complete(tmp_path: Path) -> None:
@@ -72,8 +75,10 @@ def test_streaming_ocr_prefetch_fanout_is_bounded_and_complete(tmp_path: Path) -
         "recognized_count": 5,
         "batch_count": 3,
         "worker_count": 2,
+        "recognize_seconds_total": prefetch.metrics["recognize_seconds_total"],
         "error": None,
     }
+    assert prefetch.metrics["recognize_seconds_total"] >= 0.0
 
 
 def test_streaming_ocr_prefetch_failure_is_optional_and_non_blocking(tmp_path: Path) -> None:
@@ -247,6 +252,10 @@ class BatchOCRAdapter(CountingOCRAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.batch_sizes: list[int] = []
+        # Mirror the production adapter's instrumentation contract so pipeline
+        # metric aggregation is exercised end to end.
+        self.batch_roundtrip_seconds_total = 0.0
+        self.batch_roundtrip_count = 0
 
     def recognize_many(
         self,
@@ -256,14 +265,18 @@ class BatchOCRAdapter(CountingOCRAdapter):
         observation_ids: list[str],
         language: str | None = None,
     ) -> dict[str, OCRObservation]:
+        started = time.perf_counter()
         self.batch_sizes.append(len(images))
         self.calls.extend(str(image) for image in images)
-        return {
+        results = {
             frame_id: _observation(frame_id, observation_id, image.stem)
             for image, frame_id, observation_id in zip(
                 images, frame_ids, observation_ids, strict=True
             )
         }
+        self.batch_roundtrip_seconds_total += time.perf_counter() - started
+        self.batch_roundtrip_count += 1
+        return results
 
 
 class SpawnableBatchOCRAdapter(BatchOCRAdapter):

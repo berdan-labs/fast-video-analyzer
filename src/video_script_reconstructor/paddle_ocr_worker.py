@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -198,11 +199,17 @@ class _PersistentSession:
         self._device: str | None = None
         self._engine_key: tuple[str, str, str] | None = None
         self._versions: dict[str, str | None] | None = None
+        # Set only on the request that paid the one-time engine load; the
+        # response builder reports it once and clears it so later requests
+        # carry pure inference time.
+        self.last_engine_load_seconds: float | None = None
 
     def _ensure_engine(self, request: dict[str, Any]) -> None:
         key = _engine_key(request)
         if self._ocr is None:
+            load_started = time.perf_counter()
             self._ocr, self._device = _load_engine(request)
+            self.last_engine_load_seconds = time.perf_counter() - load_started
             self._engine_key = key
             self._versions = _package_versions()
             return
@@ -213,20 +220,29 @@ class _PersistentSession:
         mode = request.get("mode")
         if mode not in {"recognize", "recognize_batch"}:
             raise ValueError(f"Unsupported persistent worker mode: {mode!r}")
+        request_started = time.perf_counter()
         self._ensure_engine(request)
         if mode == "recognize":
-            return _recognize(
+            response = _recognize(
                 request,
                 ocr=self._ocr,
                 loaded_device=self._device,
                 loaded_versions=self._versions,
             )
-        return _recognize_batch(
-            request,
-            ocr=self._ocr,
-            loaded_device=self._device,
-            loaded_versions=self._versions,
-        )
+        else:
+            response = _recognize_batch(
+                request,
+                ocr=self._ocr,
+                loaded_device=self._device,
+                loaded_versions=self._versions,
+            )
+        # Instrumentation only: lets a benchmark separate engine warmup from
+        # steady-state inference. Extra protocol keys never reach observations.
+        response["elapsed_seconds"] = round(time.perf_counter() - request_started, 6)
+        if self.last_engine_load_seconds is not None:
+            response["engine_load_seconds"] = round(self.last_engine_load_seconds, 6)
+            self.last_engine_load_seconds = None
+        return response
 
 
 def _probe() -> dict[str, Any]:
@@ -277,7 +293,10 @@ def _persistent_main() -> int:
             status = 1
         if request_id is not None:
             response["request_id"] = request_id
-        print(RESULT_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":")), flush=True)
+        print(
+            RESULT_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
+        )
         # A request failure is reported to the client, which tears down this
         # session and restarts from its durable OCR checkpoint.  Keeping the
         # process alive here makes the protocol inspectable and avoids a race
@@ -290,6 +309,7 @@ def _persistent_main() -> int:
 def main() -> int:
     if "--persistent" in sys.argv[1:]:
         return _persistent_main()
+    one_shot_started = time.perf_counter()
     try:
         request = json.loads(sys.stdin.read())
         if not isinstance(request, dict):
@@ -299,6 +319,11 @@ def main() -> int:
     except Exception as exc:  # pragma: no cover - subprocess boundary
         response = {"ok": False, "error_type": type(exc).__name__, "error": str(exc)}
         status = 1
+    if status == 0:
+        # The one-shot path includes interpreter and Paddle import time, so
+        # this number is a cold-start total, not comparable to the persistent
+        # session's per-request elapsed time.
+        response["elapsed_seconds"] = round(time.perf_counter() - one_shot_started, 6)
     print(RESULT_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":")))
     return status
 
