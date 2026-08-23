@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import video_script_reconstructor.pipeline as pipeline_module
+from video_script_reconstructor.errors import BlockedError, ValidationFailure
 from video_script_reconstructor.ocr import (
     OCRAdapter,
     OCRObservation,
@@ -19,6 +20,7 @@ from video_script_reconstructor.pipeline import (
     _ocr_checkpoint_flush_interval,
     _ocr_workers,
     _paddle_ocr_batch_workers,
+    _partition_round_robin,
     _prune_shared_json_cache,
     _restore_ocr_cache,
     _StreamingOCRPrefetch,
@@ -157,8 +159,20 @@ def test_paddle_ocr_batch_worker_policy_is_bounded(monkeypatch: pytest.MonkeyPat
     assert _paddle_ocr_batch_workers() == 2
     monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "invalid")
     assert _paddle_ocr_batch_workers() == 1
-    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "2")
+    # Adapters without an independent worker factory retain the sequential path.
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "4")
     assert _paddle_ocr_batch_workers(BatchOCRAdapter()) == 1
+    assert _paddle_ocr_batch_workers(SpawnableBatchOCRAdapter()) == 2
+
+
+def test_partition_round_robin_is_deterministic_and_total() -> None:
+    items = [10, 11, 12, 13, 14, 15, 16]
+    shards = _partition_round_robin(items, 3)
+    assert shards == [[10, 13, 16], [11, 14], [12, 15]]
+    assert sorted(item for shard in shards for item in shard) == items
+    assert _partition_round_robin(items, 1) == [items]
+    assert _partition_round_robin([], 4) == [[], [], [], []]
+    assert _partition_round_robin(items, 0) == [items]
 
 
 def test_ocr_checkpoint_accepts_prefetched_observations(tmp_path: Path) -> None:
@@ -850,3 +864,215 @@ def test_ocr_checkpoint_flush_interval_is_bounded(monkeypatch: pytest.MonkeyPatc
     assert _ocr_checkpoint_flush_interval() == 64
     monkeypatch.setenv("VSR_OCR_CHECKPOINT_BATCH", "invalid")
     assert _ocr_checkpoint_flush_interval() == 16
+
+
+class ClosingSpawnableBatchOCRAdapter(OCRAdapter):
+    """Track spawned children so ownership cleanup can be asserted."""
+
+    def __init__(self, *, shared: ClosingSpawnableBatchOCRAdapter | None = None) -> None:
+        self.batch_sizes: list[int] = [] if shared is None else shared.batch_sizes
+        self.calls: list[str] = [] if shared is None else shared.calls
+        self.children: list[ClosingSpawnableBatchOCRAdapter] = []
+        if shared is not None:
+            shared.children.append(self)
+        self.closed = False
+
+    def available(self) -> bool:
+        return True
+
+    def recognize(
+        self,
+        image_path: str | Path,
+        *,
+        frame_id: str,
+        observation_id: str,
+        crop_id: str | None = None,
+        language: str | None = None,
+    ) -> OCRObservation:
+        return _observation(frame_id, observation_id, Path(image_path).stem)
+
+    def recognize_many(
+        self,
+        images: list[Path],
+        *,
+        frame_ids: list[str],
+        observation_ids: list[str],
+        language: str | None = None,
+    ) -> dict[str, OCRObservation]:
+        self.batch_sizes.append(len(images))
+        self.calls.extend(str(image) for image in images)
+        return {
+            frame_id: _observation(frame_id, observation_id, image.stem)
+            for image, frame_id, observation_id in zip(
+                images, frame_ids, observation_ids, strict=True
+            )
+        }
+
+    def spawn_worker(self) -> ClosingSpawnableBatchOCRAdapter:
+        return type(self)(shared=self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_sharded_paddle_batches_match_sequential_outputs_and_close_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opt-in sharding is a pure scheduling change: identical observations,
+    deterministic per-frame IDs, and every owned worker closed afterwards."""
+
+    monkeypatch.delenv("VSR_PADDLE_OCR_WORKERS", raising=False)
+    values = ["a", "b", "c", "d", "e"]
+    sequential_project = tmp_path / "sequential"
+    sequential_result, _sequential_metrics = _load_or_run_ocr(
+        tmp_path / "source.mp4",
+        sequential_project,
+        _frames(sequential_project, values),
+        adapter=SpawnableBatchOCRAdapter(),
+        adapter_key="fixture-shard",
+        source_sha256="source-digest",
+    )
+
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "3")
+    monkeypatch.setenv("VSR_OCR_BATCH_SIZE", "2")
+    sharded_project = tmp_path / "sharded"
+    adapter = ClosingSpawnableBatchOCRAdapter()
+    result, metrics = _load_or_run_ocr(
+        tmp_path / "source.mp4",
+        sharded_project,
+        _frames(sharded_project, values),
+        adapter=adapter,
+        adapter_key="fixture-shard",
+        source_sha256="source-digest",
+    )
+
+    assert result == sequential_result
+    assert metrics["worker_count"] == 2
+    assert metrics["batch_count"] == 3
+    assert metrics["checkpoint_flush_count"] == 3
+    assert sorted(adapter.batch_sizes) == [1, 2, 2]
+    for index, frame_id in enumerate(("F000001", "F000002", "F000003", "F000004", "F000005"), 1):
+        assert result[frame_id].observation_id == f"O{index:06d}"
+        assert result[frame_id].normalized_interpretation == f"frame-{values[index - 1]}"
+    assert len(adapter.children) == 1
+    assert all(child.closed for child in adapter.children)
+
+
+def test_sharded_paddle_failure_propagates_and_closes_owned_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shard failure is never swallowed; owned workers are still closed and
+    a retry resumes the remaining pixels through the normal checkpoint path."""
+
+    class ShardFailingAdapter(ClosingSpawnableBatchOCRAdapter):
+        def recognize_many(
+            self,
+            images: list[Path],
+            *,
+            frame_ids: list[str],
+            observation_ids: list[str],
+            language: str | None = None,
+        ) -> dict[str, OCRObservation]:
+            self.batch_sizes.append(len(images))
+            self.calls.extend(str(image) for image in images)
+            if "F000002" in frame_ids:
+                raise RuntimeError("fixture shard failure")
+            return {
+                frame_id: _observation(frame_id, observation_id, image.stem)
+                for image, frame_id, observation_id in zip(
+                    images, frame_ids, observation_ids, strict=True
+                )
+            }
+
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "3")
+    monkeypatch.setenv("VSR_OCR_BATCH_SIZE", "1")
+    frames = _frames(tmp_path, ["a", "b", "c", "d"])
+    adapter = ShardFailingAdapter()
+    with pytest.raises(RuntimeError, match="fixture shard failure"):
+        _load_or_run_ocr(
+            tmp_path / "source.mp4",
+            tmp_path,
+            frames,
+            adapter=adapter,
+            adapter_key="fixture-shard-failure",
+            source_sha256="source-digest",
+        )
+    assert len(adapter.children) == 1
+    assert all(child.closed for child in adapter.children)
+
+    retry_adapter = SpawnableBatchOCRAdapter()
+    retry_result, _retry_metrics = _load_or_run_ocr(
+        tmp_path / "source.mp4",
+        tmp_path,
+        frames,
+        adapter=retry_adapter,
+        adapter_key="fixture-shard-failure",
+        source_sha256="source-digest",
+    )
+    assert set(retry_result) == {"F000001", "F000002", "F000003", "F000004"}
+    for index, frame_id in enumerate(("F000001", "F000002", "F000003", "F000004"), 1):
+        assert retry_result[frame_id].observation_id == f"O{index:06d}"
+
+
+def test_sharded_paddle_spawn_failure_closes_partial_workers_and_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If independent worker creation fails mid-fan-out, already-created
+    workers are closed and the failure propagates to the caller."""
+
+    class ExhaustedSpawnerAdapter(ClosingSpawnableBatchOCRAdapter):
+        def __init__(self, *, shared: ExhaustedSpawnerAdapter | None = None) -> None:
+            super().__init__(shared=shared)
+            self.spawn_calls = 0
+
+        def spawn_worker(self) -> ExhaustedSpawnerAdapter:
+            self.spawn_calls += 1
+            if self.spawn_calls > 1:
+                raise BlockedError("fixture spawn exhaustion")
+            return super().spawn_worker()
+
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "3")
+    monkeypatch.setenv("VSR_OCR_BATCH_SIZE", "1")
+    monkeypatch.setattr(pipeline_module, "_paddle_ocr_batch_workers", lambda adapter=None: 3)
+    frames = _frames(tmp_path, ["a", "b", "c"])
+    adapter = ExhaustedSpawnerAdapter()
+    with pytest.raises(BlockedError, match="fixture spawn exhaustion"):
+        _load_or_run_ocr(
+            tmp_path / "source.mp4",
+            tmp_path,
+            frames,
+            adapter=adapter,
+            adapter_key="fixture-spawn-failure",
+            source_sha256="source-digest",
+        )
+    assert adapter.spawn_calls == 2
+    assert len(adapter.children) == 1
+    assert adapter.children[0].closed
+
+
+def test_sharded_paddle_rejected_worker_is_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A spawned worker that fails capability validation is not leaked."""
+
+    class UnavailableSpawnerAdapter(ClosingSpawnableBatchOCRAdapter):
+        def spawn_worker(self) -> UnavailableSpawnerAdapter:
+            worker = super().spawn_worker()
+            worker.available = lambda: False  # type: ignore[method-assign]
+            return worker
+
+    monkeypatch.setenv("VSR_PADDLE_OCR_WORKERS", "2")
+    monkeypatch.setenv("VSR_OCR_BATCH_SIZE", "1")
+    frames = _frames(tmp_path, ["a", "b"])
+    adapter = UnavailableSpawnerAdapter()
+    with pytest.raises(ValidationFailure, match="independent worker is unavailable"):
+        _load_or_run_ocr(
+            tmp_path / "source.mp4",
+            tmp_path,
+            frames,
+            adapter=adapter,
+            adapter_key="fixture-unavailable-worker",
+            source_sha256="source-digest",
+        )
+    assert len(adapter.children) == 1
+    assert adapter.children[0].closed

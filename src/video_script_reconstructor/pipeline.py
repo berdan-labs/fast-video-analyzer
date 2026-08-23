@@ -3007,8 +3007,9 @@ def _paddle_ocr_batch_workers(adapter: Any | None = None) -> int:
 
     A Paddle adapter owns a stateful isolated worker, so concurrent requests
     require independent ``spawn_worker`` instances.  Keep the default at one
-    process for predictable memory use and make the measured two-worker path
-    explicit.  Adapters without the factory retain the sequential path.
+    process for predictable memory use and make any measured fan-out explicit.
+    The hard cap bounds the opt-in experiment's process/memory footprint, and
+    adapters without the factory retain the sequential path.
     """
 
     raw = os.environ.get("VSR_PADDLE_OCR_WORKERS", "").strip()
@@ -3541,6 +3542,21 @@ class _StreamingOCRPrefetch:
         }
 
 
+def _partition_round_robin(items: Sequence[Any], shard_count: int) -> list[list[Any]]:
+    """Split ``items`` into ``shard_count`` deterministic round-robin shards.
+
+    Sharding is a pure scheduling decision: given the same item order and
+    shard count, every run assigns identical items to identical shards, so the
+    merged evidence cannot depend on worker timing.  ``shard_count`` is always
+    at least one; excess shards are simply empty.
+    """
+
+    shards: list[list[Any]] = [[] for _ in range(max(1, shard_count))]
+    for position, item in enumerate(items):
+        shards[position % len(shards)].append(item)
+    return shards
+
+
 def _load_or_run_ocr(
     source: Path,
     project_dir: Path,
@@ -3654,7 +3670,12 @@ def _load_or_run_ocr(
     representative_count = len(representative_indices)
     completed_by_key: dict[str, Any] = {}
     batch_method = getattr(adapter, "recognize_many", None)
-    ocr_worker_count = 1 if callable(batch_method) else _ocr_workers()
+    # Batch-capable adapters own one stateful worker, so the canonical batch
+    # path stays sequential unless the bounded opt-in policy resolves more
+    # independent workers (it retains the spawn_worker capability check).
+    ocr_worker_count = (
+        _paddle_ocr_batch_workers(adapter) if callable(batch_method) else _ocr_workers()
+    )
     cache_entries = dict(cached)
     prefetched_hits = 0
     prefetched = prefetched_by_frame_id or {}
@@ -3703,19 +3724,24 @@ def _load_or_run_ocr(
         # every completed batch so a timeout/restart resumes from the last
         # durable chunk instead of leaving orphaned visual artifacts.
         batch_size = _ocr_batch_size()
-        for start in range(0, len(representative_indices), batch_size):
+
+        def build_batch(start: int) -> tuple[list[int], list[Path], list[str], list[str]]:
             batch_indices = representative_indices[start : start + batch_size]
-            images = [
-                project_dir / str(ordered_frames[index]["full_frame_path"])
-                for index in batch_indices
-            ]
-            frame_ids = [str(ordered_frames[index]["frame_id"]) for index in batch_indices]
-            observation_ids = [f"O{index + 1:06d}" for index in batch_indices]
-            batch_results = batch_method(
-                images,
-                frame_ids=frame_ids,
-                observation_ids=observation_ids,
+            return (
+                batch_indices,
+                [
+                    project_dir / str(ordered_frames[index]["full_frame_path"])
+                    for index in batch_indices
+                ],
+                [str(ordered_frames[index]["frame_id"]) for index in batch_indices],
+                [f"O{index + 1:06d}" for index in batch_indices],
             )
+
+        def apply_batch_results(
+            batch_indices: Sequence[int],
+            frame_ids: Sequence[str],
+            batch_results: Any,
+        ) -> None:
             if not isinstance(batch_results, Mapping):
                 raise ValidationFailure("OCR batch adapter returned a non-mapping result")
             for index, frame_id in zip(batch_indices, frame_ids, strict=True):
@@ -3724,11 +3750,132 @@ def _load_or_run_ocr(
                     raise ValidationFailure("OCR batch adapter returned an invalid observation")
                 completed_by_key[frame_keys[index]] = result
                 cache_entries[frame_keys[index]] = result
-            # Persist every chunk.  This is intentionally independent of the
-            # observation checkpoint interval: one batch is the worker's
-            # failure/retry boundary and is small enough to keep the cache
-            # writes bounded on long recordings.
-            flush_incremental_checkpoint()
+
+        batches = [
+            build_batch(start) for start in range(0, len(representative_indices), batch_size)
+        ]
+        shard_count = min(ocr_worker_count, len(batches))
+        if shard_count > 1:
+            # Opt-in horizontal sharding experiment.  Every shard owns an
+            # independent ``spawn_worker`` adapter so stateful workers never
+            # serve two requests at once.  Batches are partitioned
+            # deterministically and results merge strictly by batch position,
+            # so outputs and checkpoint flush order match the sequential path
+            # regardless of completion order.  Owned workers are always closed
+            # and any failure propagates to the existing validation boundary.
+            spawn_worker = getattr(adapter, "spawn_worker", None)
+            if not callable(spawn_worker):
+                raise ValidationFailure("OCR adapter cannot spawn independent workers")
+            shard_workers: list[Any] = [adapter]
+            owned_workers: list[Any] = []
+            try:
+                for _ in range(shard_count - 1):
+                    worker = spawn_worker()
+                    owned_workers.append(worker)
+                    try:
+                        if worker is adapter or not callable(
+                            getattr(worker, "recognize_many", None)
+                        ):
+                            raise ValidationFailure(
+                                "OCR adapter returned an invalid independent worker"
+                            )
+                        worker_available = getattr(worker, "available", None)
+                        if callable(worker_available) and not worker_available():
+                            raise ValidationFailure("OCR independent worker is unavailable")
+                    except BaseException:
+                        owned_workers.pop()
+                        close = getattr(worker, "close", None)
+                        if callable(close) and worker is not adapter:
+                            close()
+                        raise
+                    shard_workers.append(worker)
+
+                def recognize_shard_batch(
+                    worker: Any,
+                    batch: tuple[list[int], list[Path], list[str], list[str]],
+                ) -> Any:
+                    _indices, images, frame_ids, observation_ids = batch
+                    return worker.recognize_many(
+                        images,
+                        frame_ids=frame_ids,
+                        observation_ids=observation_ids,
+                    )
+
+                def recognize_shard(
+                    worker: Any,
+                    shard: list[tuple[int, tuple[list[int], list[Path], list[str], list[str]]]],
+                ) -> tuple[dict[int, Any], BaseException | None]:
+                    results: dict[int, Any] = {}
+                    try:
+                        for batch_position, batch in shard:
+                            results[batch_position] = recognize_shard_batch(worker, batch)
+                    except BaseException as exc:
+                        return results, exc
+                    return results, None
+
+                shards = _partition_round_robin(list(enumerate(batches)), len(shard_workers))
+                results_by_batch: dict[int, Any] = {}
+                failure: BaseException | None = None
+                with ThreadPoolExecutor(
+                    max_workers=len(shard_workers),
+                    thread_name_prefix="vsr-paddle-ocr-shard",
+                ) as shard_pool:
+                    shard_futures = {
+                        shard_pool.submit(recognize_shard, worker, shard): worker_index
+                        for worker_index, (worker, shard) in enumerate(
+                            zip(shard_workers, shards, strict=True)
+                        )
+                        if shard
+                    }
+                    for future in as_completed(shard_futures):
+                        try:
+                            shard_results, shard_failure = future.result()
+                        except BaseException as exc:
+                            shard_results, shard_failure = {}, exc
+                        results_by_batch.update(shard_results)
+                        if failure is None and shard_failure is not None:
+                            failure = shard_failure
+                if failure is not None:
+                    # All shard futures have reported, so every completed batch
+                    # is salvaged deterministically before the original error
+                    # is propagated for the normal retry boundary.
+                    for batch_position in sorted(results_by_batch):
+                        try:
+                            salvage_indices, _images, salvage_ids, _ids = batches[batch_position]
+                            apply_batch_results(
+                                salvage_indices,
+                                salvage_ids,
+                                results_by_batch[batch_position],
+                            )
+                        except Exception:  # noqa: BLE001 - salvage never masks the cause
+                            LOGGER.debug(
+                                "Discarded invalid OCR shard result during failure salvage",
+                                exc_info=True,
+                            )
+                    flush_incremental_checkpoint()
+                    raise failure
+                # Merge by batch position (frame key), never completion order.
+                for batch_position, (batch_indices, _images, frame_ids, _ids) in enumerate(batches):
+                    apply_batch_results(batch_indices, frame_ids, results_by_batch[batch_position])
+                    flush_incremental_checkpoint()
+            finally:
+                for worker in owned_workers:
+                    close = getattr(worker, "close", None)
+                    if callable(close):
+                        close()
+        else:
+            for batch_indices, images, frame_ids, observation_ids in batches:
+                batch_results = batch_method(
+                    images,
+                    frame_ids=frame_ids,
+                    observation_ids=observation_ids,
+                )
+                apply_batch_results(batch_indices, frame_ids, batch_results)
+                # Persist every chunk.  This is intentionally independent of the
+                # observation checkpoint interval: one batch is the worker's
+                # failure/retry boundary and is small enough to keep the cache
+                # writes bounded on long recordings.
+                flush_incremental_checkpoint()
     elif representative_indices:
         def recognize_one(index: int) -> tuple[str, Any]:
             frame = ordered_frames[index]
@@ -3747,12 +3894,12 @@ def _load_or_run_ocr(
         with ThreadPoolExecutor(
             max_workers=ocr_worker_count, thread_name_prefix="vsr-ocr"
         ) as pool:
-            pending_futures = {
+            ocr_futures = {
                 pool.submit(recognize_one, index): index for index in representative_indices
             }
             try:
-                for completed_count, future in enumerate(as_completed(pending_futures), 1):
-                    frame_key, observation = future.result()
+                for completed_count, ocr_future in enumerate(as_completed(ocr_futures), 1):
+                    frame_key, observation = ocr_future.result()
                     completed_by_key[frame_key] = observation
                     cache_entries[frame_key] = observation
                     if completed_count % _ocr_checkpoint_flush_interval() == 0:
@@ -3844,7 +3991,14 @@ def _load_or_run_ocr(
         "cache_reused_without_rewrite": cache_reused_without_rewrite,
         "checkpoint_flush_count": checkpoint_flush_count,
         "checkpoint_write_failures": checkpoint_write_failures,
-        "worker_count": ocr_worker_count,
+        "worker_count": (
+            min(
+                ocr_worker_count,
+                (len(representative_indices) + _ocr_batch_size() - 1) // _ocr_batch_size(),
+            )
+            if callable(batch_method) and representative_indices
+            else ocr_worker_count
+        ),
         "batch_size": _ocr_batch_size() if callable(batch_method) else None,
         "batch_count": (
             (len(representative_indices) + _ocr_batch_size() - 1) // _ocr_batch_size()
