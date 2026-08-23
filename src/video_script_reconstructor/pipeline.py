@@ -3292,6 +3292,45 @@ def _restore_ocr_cache(
     return restored[0] if restored is not None else None
 
 
+def _has_valid_shared_ocr_receipt(
+    *,
+    source_digest: str,
+    adapter: Any,
+    adapter_key: str,
+    shared_cache_dir: Path | None,
+) -> bool:
+    """Return whether a validated shared OCR receipt already exists.
+
+    This is a prefetch scheduling hint only.  ``_load_or_run_ocr`` remains the
+    authority for mapping pixel hashes and restoring observations.  A corrupt,
+    oversized, missing, or otherwise mismatched receipt is treated as a cache
+    miss so the cold streaming path is preserved.
+    """
+
+    if shared_cache_dir is None or _ocr_shared_cache_limit() <= 0:
+        return False
+    try:
+        adapter_identity = _ocr_cache_adapter_identity(adapter, adapter_key)
+        checkpoint_key = cache_key(
+            "ocr-observations-v1",
+            source_digest,
+            adapter_identity,
+            __version__,
+        )
+        shared_path = Path(shared_cache_dir).expanduser() / "ocr" / f"{checkpoint_key}.json"
+        restored = _restore_ocr_cache_payload(
+            shared_path,
+            cache_key_value=checkpoint_key,
+            source_digest=source_digest,
+            adapter_identity=adapter_identity,
+            cache_limit=_ocr_shared_cache_limit(),
+        )
+        return bool(restored and restored[0])
+    except (OSError, TypeError, ValueError, KeyError, ValidationFailure):
+        LOGGER.info("Shared OCR prefetch probe failed; retaining cold prefetch path")
+        return False
+
+
 def _write_ocr_cache(
     cache_path: Path,
     *,
@@ -4049,6 +4088,7 @@ def _load_or_run_ocr(
         ),
         "prefetch_worker_count": int((prefetch_metrics or {}).get("worker_count", 1)),
         "prefetch_error": (prefetch_metrics or {}).get("error"),
+        "prefetch_suppressed": (prefetch_metrics or {}).get("suppressed"),
         "cache_deduplicated_count": max(0, len(pending) - len(representative_indices)),
         "cache_written": cache_written,
         "shared_cache_written": shared_cache_written,
@@ -6379,16 +6419,28 @@ def _extract_visual_evidence(
     prefetched_by_frame_id: dict[str, Any] = {}
     prefetch_metrics: dict[str, Any] = {}
     if adapter is not None and callable(getattr(adapter, "recognize_many", None)):
-        try:
-            prefetch = _StreamingOCRPrefetch(
-                adapter,
-                batch_size=_ocr_batch_size(),
-                worker_count=_streaming_ocr_prefetch_workers(
-                    adapter=adapter, duration_ms=duration_ms
-                ),
-            )
-        except InputError:
-            LOGGER.info("Streaming OCR prefetch is unavailable for this adapter")
+        source_digest = source_sha256 or sha256_file(source)
+        if _has_valid_shared_ocr_receipt(
+            source_digest=source_digest,
+            adapter=adapter,
+            adapter_key=ocr_cache_key,
+            shared_cache_dir=_visual_shared_cache_dir(),
+        ):
+            prefetch_metrics = {
+                "worker_count": 0,
+                "suppressed": "valid_shared_ocr_cache",
+            }
+        else:
+            try:
+                prefetch = _StreamingOCRPrefetch(
+                    adapter,
+                    batch_size=_ocr_batch_size(),
+                    worker_count=_streaming_ocr_prefetch_workers(
+                        adapter=adapter, duration_ms=duration_ms
+                    ),
+                )
+            except InputError:
+                LOGGER.info("Streaming OCR prefetch is unavailable for this adapter")
 
     decode_started = time.perf_counter()
     try:
