@@ -5,25 +5,19 @@ system. Checked items are present on `main`; unchecked items require an owner
 decision, an external account, or a future focused change. Review this file
 weekly and update it through a pull request.
 
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-24
 
-Review note (2026-08-22): No open issues or pull requests; `main` CI and
-CodeQL passed after the persistent single-image OCR routing fix, owner-only
-design-draft boundary, and their changelog/maintenance follow-ups (`d91f65e`,
-`a3eb518`, `d9760e5`). The sparse-seek threshold experiment was reverted after
-broader corpus evidence showed no general speed benefit; ASR/visual overlap and
-semantic-streaming proposals were also rejected on measured regression or
-shared-state safety grounds. Security and dependency alerts remain clear; the
-five-hour qualification is still pending an authorized stronger host.
-Owner-only receipts, media, and hardware fingerprints remain outside Git.
-
-The compute-type experiment enablement and cache-identity protection merged as
-PR #62 (`f7d2d4c`) without changing the CUDA `float16` default. A fresh
-30-minute owner-local screening rejected both tested quantized modes: `int8`
-was slower than the matching `float16` ASR control and its normalized transcript
-digest differed, while `int8_float16` also failed the ASR throughput gate. No
-precision default or five-hour performance claim changed; raw receipts remain
-owner-local.
+Review note (2026-08-24): No open issues or pull requests; `main` CI and
+CodeQL passed after the single-pass timeline validation optimization (PR #71,
+`2235720`), redundant OCR prefetch skip on shared cache hits (`6ce3641`),
+auto-bounded long OCR prefetch (`816a1f7`), bounded streaming OCR prefetch
+workers (`d773b94`), OCR latency telemetry breakdown (`bb7fef5`), opt-in
+sharded PaddleOCR batching (`0499650`), and guarded survey hardware decode
+experiment (`714e358`). Safe Whisper compute-type experiment enablement and
+screening decisions were merged in PR #62 (`f7d2d4c`) and PR #63 (`92bf9c2`).
+Security and dependency alerts remain clear. The 5-hour qualification target
+remains active pending an authorized stronger host. Owner-only receipts, media,
+and hardware fingerprints remain outside Git.
 
 ## Completed
 
