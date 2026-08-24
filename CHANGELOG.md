@@ -15,9 +15,17 @@ intent.
   evaluator now record cold-cache runtime facts, stable output-lane digests,
   and exact quality-contract evidence without turning an unqualified timing
   result into a product promise.
+- Opt-in safe Whisper compute-type experiment configuration with strict
+  cache-identity isolation while preserving the `float16` CUDA default.
+- Guarded survey hardware decode experiment with automatic software fallback.
+- Opt-in sharded PaddleOCR batching and OCR latency breakdown telemetry.
 
 ### Changed
 
+- Timeline validation now executes in a true single pass, verifying timing bounds,
+  canonical chronological ordering, and item counts without redundant sorting sweeps.
+- Streaming OCR prefetch now skips redundant decodes on shared cache hits and
+  bounds worker concurrency for long media files.
 - Owner-local qualification policies can now enforce peak-RSS and output-size
   budgets; missing or over-budget measurements fail closed.
 - Single-image PP-OCRv5 recognition now uses the existing persistent worker
