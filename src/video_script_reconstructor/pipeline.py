@@ -53,6 +53,7 @@ from .validate_output import (
 if TYPE_CHECKING:
     from .ocr import OCRAdapter
     from .providers.base import VisionProvider
+    from .timeline import TimelineItem
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm"}
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a"}
@@ -76,6 +77,39 @@ _SHARED_JSON_PRUNE_STATE: dict[Path, tuple[int, int, dict[Path, int]]] = {}
 # otherwise ordinary 2--5 hour videos.  Keep the bound finite for prompt,
 # storage, and review safety; callers can still set an explicit lower budget.
 _DEFAULT_HOST_REVIEW_MAX_PACKETS = 4_096
+
+def _timeline_record(item: TimelineItem) -> dict[str, Any]:
+    """Materialize a timeline record at the pipeline's read-only write boundary."""
+
+    payload = item.payload
+    if type(payload) is not dict:
+        return item.model_dump()
+    return {
+        "timeline_id": item.timeline_id,
+        "kind": item.kind,
+        "source_id": item.source_id,
+        "start_ms": item.start_ms,
+        "end_ms": item.end_ms,
+        "timing_provenance": item.timing_provenance,
+        "payload": dict(payload),
+        "source_order": item.source_order,
+    }
+
+
+def _write_timeline_records(
+    path: Path,
+    items: Sequence[TimelineItem],
+    validation: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    records = [_timeline_record(item) for item in items]
+    document = {"schema_version": "1.0", "items": records, "validation": validation}
+    try:
+        atomic_write_json(path, document, compact=True)
+    except TypeError:
+        records = [item.model_dump() for item in items]
+        document["items"] = records
+        atomic_write_json(path, document, compact=True)
+    return records
 
 
 def default_output_root() -> Path:
@@ -9605,11 +9639,10 @@ def run_pipeline(
             "timed_count": checked_timeline.timed_count,
             "untimed_count": checked_timeline.untimed_count,
         }
-        timeline_records = [item.model_dump() for item in timeline_items]
-        atomic_write_json(
+        timeline_records = _write_timeline_records(
             project_dir / ".state" / "timeline" / "timeline.json",
-            {"schema_version": "1.0", "items": timeline_records, "validation": timeline_report},
-            compact=True,
+            timeline_items,
+            timeline_report,
         )
         if not checked_timeline.valid:
             blockers.append("Timeline stage blocked: " + "; ".join(checked_timeline.errors))
