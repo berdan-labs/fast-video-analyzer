@@ -8232,7 +8232,7 @@ def _ensure_sufficiency_decisions(
         )
         review_ids = list(review_ids_by_frame.get(image_id, []))
         raw = current.model_dump(mode="json")
-        payload_history.append(raw)
+        payload_history.append(current.model_dump(mode="json"))
         raw["links"].update(
             {
                 "chapter_ids": chapter_ids,

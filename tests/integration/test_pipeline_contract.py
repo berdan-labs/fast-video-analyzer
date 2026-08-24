@@ -15,12 +15,16 @@ import video_script_reconstructor.subagent_review as subagent_module
 from video_script_reconstructor.errors import ValidationFailure
 from video_script_reconstructor.evidence import ingest_project_observation, verify_image_metadata
 from video_script_reconstructor.frame_quality import perceptual_dhash
-from video_script_reconstructor.image_metadata import read_embedded_metadata
+from video_script_reconstructor.image_metadata import (
+    canonical_payload_digest,
+    read_embedded_metadata,
+)
 from video_script_reconstructor.ocr import OCRAdapter, OCRObservation, OCRToken
 from video_script_reconstructor.pipeline import run_pipeline
 from video_script_reconstructor.providers.base import ProviderDescriptor, VisionProvider
 from video_script_reconstructor.resource_usage import resource_snapshot
 from video_script_reconstructor.review import apply_review, finalize_project
+from video_script_reconstructor.schemas import EvidenceImageMetadata
 from video_script_reconstructor.security import sha256_file
 from video_script_reconstructor.semantic_pipeline import (
     apply_vision_provider,
@@ -407,6 +411,24 @@ def test_generated_video_has_measured_frames_and_embedded_metadata(tmp_path: Pat
     # long-form projects without changing parsed state.
     assert timeline_path.read_text(encoding="utf-8").count("\n") == 1
     assert image_observations_path.read_text(encoding="utf-8").count("\n") == 1
+    image_observations = json.loads(image_observations_path.read_text(encoding="utf-8"))
+    history_by_image: dict[str, list[EvidenceImageMetadata]] = {}
+    for entry in image_observations["payload_history"]:
+        snapshot = EvidenceImageMetadata.model_validate(entry)
+        assert canonical_payload_digest(snapshot) == snapshot.integrity.payload_digest
+        history_by_image.setdefault(snapshot.image.image_id, []).append(snapshot)
+    sufficiency_revisions = [
+        revision
+        for revision in image_observations["revisions"]
+        if revision["reconciliation_method"] == "deterministic-sufficiency-decision"
+    ]
+    assert sufficiency_revisions
+    for revision in sufficiency_revisions:
+        assert any(
+            snapshot.integrity.payload_digest == revision["previous_payload_digest"]
+            and snapshot.analysis.latest_revision_id == revision["base_revision_id"]
+            for snapshot in history_by_image[revision["image_id"]]
+        ), revision["revision_id"]
     assert all(frame["timestamp_source"] == "ffmpeg-showinfo" for frame in frames)
     assert all(frame["offset_ms"] == frame["actual_ms"] - frame["requested_ms"] for frame in frames)
     metadata_results = verify_image_metadata(result.project_dir)
