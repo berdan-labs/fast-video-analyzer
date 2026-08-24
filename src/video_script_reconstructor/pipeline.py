@@ -7053,7 +7053,6 @@ def _extract_visual_evidence(
             {
                 "frame": frame,
                 "frame_id": frame_id,
-                "path": path,
                 "current": current,
                 "revision_id": revision_id,
                 "updated": updated,
@@ -7064,36 +7063,29 @@ def _extract_visual_evidence(
             }
         )
 
-    # PNG metadata writes preserve the original pixel stream and perform a
-    # read-back verification. They are independent across images, so run the
-    # expensive byte-copy/read-back work in a bounded pool, then commit all
-    # canonical payloads, revisions, and links in deterministic frame order.
+    # Validate deterministic envelopes in memory and commit their canonical
+    # mirrors in frame order. The terminal sufficiency revision performs the
+    # only retained-image PNG rewrite, so these staged revisions must not claim
+    # an embedded write or read-back that did not occur.
     with _executor_context(
         worker_pool,
         max_workers=_visual_frame_workers(),
         thread_name_prefix="vsr-metadata",
     ) as pool:
         futures = [
-            pool.submit(
-                embed_metadata_with_file_hash,
-                job["path"],
-                job["updated"],
-                verify_source_pixels=False,
-                verify_decoded_pixels=False,
-            )
+            pool.submit(prepare_metadata_payload, job["updated"])
             for job in enrichment_jobs
         ]
         for job, future in zip(enrichment_jobs, futures, strict=True):
             frame = cast(dict[str, Any], job["frame"])
             frame_id = str(job["frame_id"])
-            path = cast(Path, job["path"])
             current = job["current"]
             revision_id = str(job["revision_id"])
             selected = job["selected"]
             ocr_observation = job["ocr_observation"]
             ocr_ids = cast(list[str], job["ocr_ids"])
             difference_regions = cast(list[dict[str, Any]], job["difference_regions"])
-            prepared, file_hash = future.result()
+            prepared = future.result()
             prepared_dict = prepared.model_dump(mode="json")
             payload_index = payload_index_by_image_id.get(frame_id)
             if payload_index is None:
@@ -7122,8 +7114,8 @@ def _extract_visual_evidence(
                     "stale_base_reconciled": False,
                     "pixel_invariance_verified": current.image.pixel_hash
                     == prepared.image.pixel_hash,
-                    "embedded_write_verified": True,
-                    "read_back_verified": True,
+                    "embedded_write_verified": False,
+                    "read_back_verified": False,
                     "canonical_mirror_committed": True,
                     "created_at_utc": _now(),
                 }
@@ -7149,7 +7141,6 @@ def _extract_visual_evidence(
                     "evidence_role": str(
                         frame.get("evidence_role") or selected.candidate.evidence_role
                     ),
-                    "file_hash": file_hash,
                     "metadata": prepared_dict,
                 }
             )
@@ -7360,6 +7351,7 @@ def _extract_visual_evidence(
             crop_image = image.crop((left, top, right, bottom))
             try:
                 crop_image.save(crop_path, "PNG")
+                crop_file_hash = sha256_file(crop_path)
                 # The crop is already decoded in memory. Reuse it for
                 # deterministic quality/hash fields instead of decoding the
                 # just-written PNG several additional times.
@@ -7371,12 +7363,12 @@ def _extract_visual_evidence(
         return {
             "parent": parent,
             "parent_id": str(spec["parent_id"]),
-            "parent_path": parent_path,
             "crop_id": str(spec["crop_id"]),
             "crop_relative": str(spec["crop_relative"]),
             "crop_xywh": crop_xywh,
             "region": spec["region"],
             "crop_pixel_hash": crop_pixel_hash,
+            "crop_file_hash": crop_file_hash,
             "crop_quality": crop_quality,
             "crop_dhash": crop_dhash,
         }
@@ -7408,15 +7400,14 @@ def _extract_visual_evidence(
     for crop_preparation in crop_preparations:
         parent = cast(dict[str, Any], crop_preparation["parent"])
         parent_id = str(crop_preparation["parent_id"])
-        parent_path = cast(Path, crop_preparation["parent_path"])
         crop_id = str(crop_preparation["crop_id"])
         crop_relative = str(crop_preparation["crop_relative"])
-        crop_path = project_dir / crop_relative
         crop_xywh = tuple(
             int(value) for value in cast(Sequence[Any], crop_preparation["crop_xywh"])
         )
         region = crop_preparation["region"]
         crop_pixel_hash = str(crop_preparation["crop_pixel_hash"])
+        crop_file_hash = str(crop_preparation["crop_file_hash"])
         crop_quality = crop_preparation["crop_quality"]
         crop_dhash = str(crop_preparation["crop_dhash"])
 
@@ -7424,15 +7415,15 @@ def _extract_visual_evidence(
         next_revision_number += 1
         creation_revision_id = f"MR{next_revision_number:06d}"
         # The selected full-frame record already carries the canonical payload
-        # produced by the deterministic enrichment pass above. Reuse that
-        # validated in-memory mirror instead of reparsing the parent PNG for
-        # every localized crop; fall back to an embedded read only for callers
-        # that provide legacy frame records without the mirror.
+        # produced by the deterministic enrichment pass above. The physical
+        # parent still carries its creation envelope until sufficiency, so a
+        # missing mirror cannot safely fall back to the embedded payload.
         parent_payload = parent.get("metadata")
-        if isinstance(parent_payload, Mapping):
-            creation_payload = json.loads(json.dumps(parent_payload))
-        else:
-            creation_payload = read_embedded_metadata(parent_path).model_dump(mode="json")
+        if not isinstance(parent_payload, Mapping):
+            raise ValidationFailure(
+                f"Deterministic metadata mirror is missing for crop parent {parent_id}"
+            )
+        creation_payload = json.loads(json.dumps(parent_payload))
         creation_payload["image"].update(
             {
                 "image_id": crop_id,
@@ -7537,8 +7528,8 @@ def _extract_visual_evidence(
                 "actor": "deterministic-visual-pipeline",
                 "stale_base_reconciled": False,
                 "pixel_invariance_verified": True,
-                "embedded_write_verified": True,
-                "read_back_verified": True,
+                "embedded_write_verified": False,
+                "read_back_verified": False,
                 "canonical_mirror_committed": True,
                 "created_at_utc": _now(),
             }
@@ -7583,12 +7574,7 @@ def _extract_visual_evidence(
                 ).hexdigest(),
             }
         )
-        enriched, crop_file_hash = embed_metadata_with_file_hash(
-            crop_path,
-            enriched_payload,
-            verify_source_pixels=False,
-            verify_decoded_pixels=False,
-        )
+        enriched = prepare_metadata_payload(enriched_payload)
         revisions.append(
             {
                 "revision_id": deterministic_revision_id,
@@ -7609,8 +7595,8 @@ def _extract_visual_evidence(
                 "actor": "deterministic-visual-pipeline",
                 "stale_base_reconciled": False,
                 "pixel_invariance_verified": created.image.pixel_hash == enriched.image.pixel_hash,
-                "embedded_write_verified": True,
-                "read_back_verified": True,
+                "embedded_write_verified": False,
+                "read_back_verified": False,
                 "canonical_mirror_committed": True,
                 "created_at_utc": _now(),
             }
@@ -8091,9 +8077,13 @@ def _ensure_sufficiency_decisions(
     """
 
     from .ids import sequential_id
-    from .image_metadata import embed_metadata_with_file_hash, read_embedded_metadata
+    from .image_metadata import (
+        embed_metadata_with_file_hash,
+        prepare_metadata_payload,
+        read_embedded_metadata,
+    )
     from .metadata_reconcile import evaluate_sufficiency
-    from .schemas import EvidenceQuestion
+    from .schemas import EvidenceImageMetadata, EvidenceQuestion
 
     decisions = json.loads(json.dumps(existing_decisions))
 
@@ -8156,6 +8146,34 @@ def _ensure_sufficiency_decisions(
         str(payload.get("image", {}).get("image_id")): index
         for index, payload in enumerate(payloads)
     }
+    revision_by_id = {
+        str(revision.get("revision_id")): revision
+        for revision in revisions
+        if revision.get("revision_id") is not None
+    }
+
+    def checked_sufficiency_base(
+        metadata: EvidenceImageMetadata,
+        *,
+        frame: Mapping[str, Any],
+        image_id: str,
+    ) -> EvidenceImageMetadata:
+        latest_revision_id = metadata.analysis.latest_revision_id
+        revision = revision_by_id.get(latest_revision_id)
+        if (
+            metadata.analysis.enrichment_level != "deterministic"
+            or metadata.image.image_id != image_id
+            or latest_revision_id != frame.get("latest_revision_id")
+            or metadata.integrity.payload_digest != frame.get("metadata_payload_digest")
+            or revision is None
+            or str(revision.get("image_id")) != image_id
+            or revision.get("revision_number") != metadata.analysis.revision_number
+            or revision.get("new_payload_digest") != metadata.integrity.payload_digest
+        ):
+            raise ValidationFailure(
+                f"Metadata mirror/revision chain mismatch before sufficiency for {image_id}"
+            )
+        return metadata
 
     for frame in sorted(
         frames, key=lambda item: (int(item.get("actual_ms", 0)), str(item.get("frame_id")))
@@ -8186,7 +8204,32 @@ def _ensure_sufficiency_decisions(
         )
 
         image_path = project_dir / str(frame.get("full_frame_path") or frame.get("path"))
-        current = read_embedded_metadata(image_path)
+        cached_payload = frame.get("metadata")
+        if isinstance(cached_payload, Mapping):
+            try:
+                current = checked_sufficiency_base(
+                    prepare_metadata_payload(cached_payload),
+                    frame=frame,
+                    image_id=image_id,
+                )
+            except (OSError, TypeError, ValueError, ValidationFailure) as mirror_error:
+                try:
+                    current = checked_sufficiency_base(
+                        read_embedded_metadata(image_path),
+                        frame=frame,
+                        image_id=image_id,
+                    )
+                except (OSError, TypeError, ValueError, ValidationFailure) as embedded_error:
+                    raise ValidationFailure(
+                        f"No valid metadata base is available before sufficiency for {image_id}; "
+                        f"mirror={mirror_error}; embedded={embedded_error}"
+                    ) from embedded_error
+        else:
+            current = checked_sufficiency_base(
+                read_embedded_metadata(image_path),
+                frame=frame,
+                image_id=image_id,
+            )
         stored_file_hash = frame.get("file_hash")
         # The deterministic stages already recorded a whole-file digest.  A
         # matching digest is a cryptographic precondition for the internal

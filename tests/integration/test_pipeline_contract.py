@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 import video_script_reconstructor.evidence as evidence_module
+import video_script_reconstructor.image_metadata as image_metadata_module
 import video_script_reconstructor.semantic_pipeline as semantic_module
 import video_script_reconstructor.subagent_review as subagent_module
 from video_script_reconstructor.errors import ValidationFailure
@@ -381,8 +382,32 @@ def test_text_review_updates_human_verified_state_and_rerenders_atomically(
     assert validate_project(result.project_dir).valid
 
 
-def test_generated_video_has_measured_frames_and_embedded_metadata(tmp_path: Path) -> None:
+def test_generated_video_has_measured_frames_and_embedded_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fixtures = _generate(tmp_path / "fixtures")
+    physical_writes: list[dict[str, object]] = []
+    embed_metadata = image_metadata_module.embed_metadata_with_file_hash
+
+    def tracked_embed_metadata(image_path: Path, payload: object, **kwargs: object):
+        prepared, file_hash = embed_metadata(image_path, payload, **kwargs)
+        physical_writes.append(
+            {
+                "image_id": prepared.image.image_id,
+                "origin": prepared.image.origin,
+                "enrichment_level": prepared.analysis.enrichment_level,
+                "has_sufficiency": bool(
+                    prepared.analysis.sufficiency.evaluated_question_ids
+                ),
+            }
+        )
+        return prepared, file_hash
+
+    monkeypatch.setattr(
+        image_metadata_module,
+        "embed_metadata_with_file_hash",
+        tracked_embed_metadata,
+    )
     result = run_pipeline(
         fixtures / "slide-lecture.mp4",
         output_root=tmp_path / "out",
@@ -400,7 +425,9 @@ def test_generated_video_has_measured_frames_and_embedded_metadata(tmp_path: Pat
     all_frames = canonical["frames"]
     assert 1 <= cached_validation.checks["metadata_workers"] <= len(all_frames)
     frames = [frame for frame in all_frames if not frame.get("parent_full_frame_id")]
+    crops = [frame for frame in all_frames if frame.get("parent_full_frame_id")]
     assert len(frames) >= 2
+    assert crops
     assert canonical["sufficiency_decisions"]
     timeline_path = result.project_dir / ".state" / "timeline" / "timeline.json"
     image_observations_path = result.project_dir / ".state" / "vision" / "image-observations.json"
@@ -412,6 +439,62 @@ def test_generated_video_has_measured_frames_and_embedded_metadata(tmp_path: Pat
     assert timeline_path.read_text(encoding="utf-8").count("\n") == 1
     assert image_observations_path.read_text(encoding="utf-8").count("\n") == 1
     image_observations = json.loads(image_observations_path.read_text(encoding="utf-8"))
+    writes_by_image: dict[str, list[dict[str, object]]] = {}
+    for write in physical_writes:
+        writes_by_image.setdefault(str(write["image_id"]), []).append(write)
+    for frame in frames:
+        writes = writes_by_image[frame["frame_id"]]
+        assert len(writes) == 2
+        assert writes[0]["enrichment_level"] == "creation"
+        assert writes[0]["has_sufficiency"] is False
+        assert writes[1]["enrichment_level"] == "deterministic"
+        assert writes[1]["has_sufficiency"] is True
+    for crop in crops:
+        writes = writes_by_image[crop["frame_id"]]
+        assert len(writes) == 1
+        assert writes[0]["enrichment_level"] == "deterministic"
+        assert writes[0]["has_sufficiency"] is True
+    candidate_frames = image_observations["candidate_frames"]
+    assert candidate_frames
+    for candidate in candidate_frames:
+        assert any(
+            write["origin"] == "candidate"
+            for write in writes_by_image[candidate["frame_id"]]
+        )
+
+    revisions_by_image: dict[str, list[dict[str, object]]] = {}
+    for revision in image_observations["revisions"]:
+        revisions_by_image.setdefault(str(revision["image_id"]), []).append(revision)
+    for frame in all_frames:
+        frame_revisions = revisions_by_image[frame["frame_id"]]
+        creation = next(
+            revision
+            for revision in frame_revisions
+            if revision["reconciliation_method"] == "creation"
+        )
+        deterministic = next(
+            revision
+            for revision in frame_revisions
+            if revision["reconciliation_method"] == "deterministic-enrichment"
+        )
+        sufficiency = next(
+            revision
+            for revision in frame_revisions
+            if revision["reconciliation_method"] == "deterministic-sufficiency-decision"
+        )
+        creation_was_written = not bool(frame.get("parent_full_frame_id"))
+        assert creation["embedded_write_verified"] is creation_was_written
+        assert creation["read_back_verified"] is creation_was_written
+        assert deterministic["pixel_invariance_verified"] is True
+        assert deterministic["canonical_mirror_committed"] is True
+        assert deterministic["embedded_write_verified"] is False
+        assert deterministic["read_back_verified"] is False
+        assert sufficiency["embedded_write_verified"] is True
+        assert sufficiency["read_back_verified"] is True
+    for revision in image_observations["candidate_revisions"]:
+        assert revision["embedded_write_verified"] is True
+        assert revision["read_back_verified"] is True
+
     history_by_image: dict[str, list[EvidenceImageMetadata]] = {}
     for entry in image_observations["payload_history"]:
         snapshot = EvidenceImageMetadata.model_validate(entry)
@@ -437,6 +520,7 @@ def test_generated_video_has_measured_frames_and_embedded_metadata(tmp_path: Pat
     pixel_values = []
     for frame in frames:
         path = result.project_dir / Path(frame["full_frame_path"])
+        assert sha256_file(path) == frame["file_hash"]
         with Image.open(path) as image:
             image.load()
             pixel_values.append(image.convert("RGB").getpixel((100, 250)))
