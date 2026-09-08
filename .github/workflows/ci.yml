@@ -34,9 +34,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install pinned FFmpeg artifact
         env:
-          FFMPEG_ARCHIVE: ffmpeg-n7.1.5-16-g9a4bb2c579-linux64-gpl-7.1.tar.xz
-          FFMPEG_SHA256: 21a55e0ad14423572523c04425fd2f7a03bee0436d25a36e629362b99e45fb00
-          FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-16-13-00/ffmpeg-n7.1.5-16-g9a4bb2c579-linux64-gpl-7.1.tar.xz
+          FFMPEG_ARCHIVE: ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz
+          FFMPEG_SHA256: c1e6caf48923dd8e6bc5e54d51ba70c321175b8162ae9c414c392990e72f0e79
+          FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/$FFMPEG_ARCHIVE"
@@ -78,9 +78,9 @@ jobs:
           python-version: "3.12"
       - name: Install pinned FFmpeg artifact
         env:
-          FFMPEG_ARCHIVE: ffmpeg-n7.1.5-16-g9a4bb2c579-linux64-gpl-7.1.tar.xz
-          FFMPEG_SHA256: 21a55e0ad14423572523c04425fd2f7a03bee0436d25a36e629362b99e45fb00
-          FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-16-13-00/ffmpeg-n7.1.5-16-g9a4bb2c579-linux64-gpl-7.1.tar.xz
+          FFMPEG_ARCHIVE: ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz
+          FFMPEG_SHA256: c1e6caf48923dd8e6bc5e54d51ba70c321175b8162ae9c414c392990e72f0e79
+          FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-linux64-gpl-7.1.tar.xz
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/$FFMPEG_ARCHIVE"
